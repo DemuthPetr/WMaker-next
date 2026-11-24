@@ -52,6 +52,8 @@ struct _wlmaker_tl_menu_t {
     /** Listener for @ref wlmtk_root_events_t::workspace_changed. */
     struct wl_listener        workspace_changed_listener;
 
+    /** Action item for 'Minimize'. */
+    wlmaker_action_item_t     *minimize_ai_ptr;
     /** Action item for 'Maximize'. */
     wlmaker_action_item_t     *maximize_ai_ptr;
     /** Action item for 'Unmaximize'. */
@@ -113,6 +115,12 @@ static void _item_handle_destroy(
 
 /** Menu items for the XDG toplevel's window menu. */
 static const wlmaker_action_item_desc_t _tl_menu_items[] = {
+    {
+        "Minimize",
+        WLMAKER_ACTION_WINDOW_MINIMIZE,
+        NULL,
+        offsetof(wlmaker_tl_menu_t, minimize_ai_ptr)
+    },
     {
         "Maximize",
         WLMAKER_ACTION_WINDOW_MAXIMIZE,

@@ -406,6 +406,19 @@ void wlmtk_window_request_shaded(wlmtk_window_t *window_ptr, bool shaded);
 /** @return whether the window currently is shaded. */
 bool wlmtk_window_is_shaded(wlmtk_window_t *window_ptr);
 
+/** @return whether the window currently is minimized. */
+bool wlmtk_window_is_minimized(wlmtk_window_t *window_ptr);
+
+/**
+ * Sets the window's minimized state. Called by the workspace: Use
+ * @ref wlmtk_workspace_minimize_window and
+ * @ref wlmtk_workspace_restore_window to minimize or restore a window.
+ *
+ * @param window_ptr
+ * @param minimized
+ */
+void wlmtk_window_set_minimized(wlmtk_window_t *window_ptr, bool minimized);
+
 /**
  * En-/Disables the window menu.
  *

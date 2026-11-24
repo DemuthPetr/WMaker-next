@@ -59,6 +59,12 @@ typedef struct {
     struct wl_signal          window_mapped;
     /** Triggers when a window is unmapped from a workspace. */
     struct wl_signal          window_unmapped;
+    /**
+     * Triggers when a window is minimized or restored. Also triggers when
+     * a minimized window gets unmapped. Data: the @ref wlmtk_window_t.
+     * Query the new state through @ref wlmtk_window_is_minimized.
+     */
+    struct wl_signal          window_minimize_changed;
 
     /** An unclaimed pointer event. Arg: @ref wlmtk_button_event_t. */
     struct wl_signal          unclaimed_button_event;

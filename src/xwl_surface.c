@@ -58,6 +58,8 @@ struct _wlmaker_xwl_surface_t {
     struct wl_listener        destroy_listener;
     /** Listener for `request_configure` signal of `wlr_xwayland_surface`. */
     struct wl_listener        request_configure_listener;
+    /** Listener for `request_minimize` signal of `wlr_xwayland_surface`. */
+    struct wl_listener        request_minimize_listener;
 
     /** Listener for the `associate` signal of `wlr_xwayland_surface`. */
     struct wl_listener        associate_listener;
@@ -106,6 +108,9 @@ static void _xwl_surface_handle_destroy(
     struct wl_listener *listener_ptr,
     void *data_ptr);
 static void _xwl_surface_handle_request_configure(
+    struct wl_listener *listener_ptr,
+    void *data_ptr);
+static void _xwl_surface_handle_request_minimize(
     struct wl_listener *listener_ptr,
     void *data_ptr);
 
@@ -204,6 +209,10 @@ wlmaker_xwl_surface_t *wlmaker_xwl_surface_create(
         &wlr_xwayland_surface_ptr->events.request_configure,
         &xwl_surface_ptr->request_configure_listener,
         _xwl_surface_handle_request_configure);
+    wlmtk_util_connect_listener_signal(
+        &wlr_xwayland_surface_ptr->events.request_minimize,
+        &xwl_surface_ptr->request_minimize_listener,
+        _xwl_surface_handle_request_minimize);
 
     wlmtk_util_connect_listener_signal(
         &wlr_xwayland_surface_ptr->events.associate,
@@ -250,6 +259,7 @@ void wlmaker_xwl_surface_destroy(wlmaker_xwl_surface_t *xwl_surface_ptr)
     wlmtk_util_disconnect_listener(&xwl_surface_ptr->set_title_listener);
     wlmtk_util_disconnect_listener(&xwl_surface_ptr->dissociate_listener);
     wlmtk_util_disconnect_listener(&xwl_surface_ptr->associate_listener);
+    wlmtk_util_disconnect_listener(&xwl_surface_ptr->request_minimize_listener);
     wlmtk_util_disconnect_listener(&xwl_surface_ptr->request_configure_listener);
     wlmtk_util_disconnect_listener(&xwl_surface_ptr->destroy_listener);
 
@@ -279,6 +289,34 @@ void _xwl_surface_handle_destroy(
     wlmaker_xwl_surface_t *xwl_surface_ptr = BS_CONTAINER_OF(
         listener_ptr, wlmaker_xwl_surface_t, destroy_listener);
     wlmaker_xwl_surface_destroy(xwl_surface_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Handler for the `request_minimize` event of `struct wlr_xwayland_surface`:
+ * Minimizes or restores the window.
+ *
+ * @param listener_ptr
+ * @param data_ptr            Points to a `struct wlr_xwayland_minimize_event`.
+ */
+void _xwl_surface_handle_request_minimize(
+    struct wl_listener *listener_ptr,
+    void *data_ptr)
+{
+    wlmaker_xwl_surface_t *xwl_surface_ptr = BS_CONTAINER_OF(
+        listener_ptr, wlmaker_xwl_surface_t, request_minimize_listener);
+    struct wlr_xwayland_minimize_event *event_ptr = data_ptr;
+    wlmtk_window_t *window_ptr = xwl_surface_ptr->window_ptr;
+    if (NULL == window_ptr) return;
+
+    if (event_ptr->minimize) {
+        wlmtk_window_request_minimize(window_ptr);
+    } else if (NULL != wlmtk_window_get_workspace(window_ptr)) {
+        wlmtk_workspace_restore_window(
+            wlmtk_window_get_workspace(window_ptr), window_ptr);
+    }
+    wlr_xwayland_surface_set_minimized(
+        event_ptr->surface, wlmtk_window_is_minimized(window_ptr));
 }
 
 /* ------------------------------------------------------------------------- */
@@ -915,6 +953,7 @@ void fake_init_wlr_xwayland_surface(
     *wlr_xwayland_surface_ptr = (struct wlr_xwayland_surface){};
     wl_signal_init(&wlr_xwayland_surface_ptr->events.destroy);
     wl_signal_init(&wlr_xwayland_surface_ptr->events.request_configure);
+    wl_signal_init(&wlr_xwayland_surface_ptr->events.request_minimize);
     wl_signal_init(&wlr_xwayland_surface_ptr->events.associate);
     wl_signal_init(&wlr_xwayland_surface_ptr->events.dissociate);
     wl_signal_init(&wlr_xwayland_surface_ptr->events.set_title);

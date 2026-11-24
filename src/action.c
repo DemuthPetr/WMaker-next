@@ -124,6 +124,7 @@ const bspl_enum_desc_t wlmaker_action_desc[] = {
     BSPL_ENUM("WindowMaximize", WLMAKER_ACTION_WINDOW_MAXIMIZE),
     BSPL_ENUM("WindowUnmaximize", WLMAKER_ACTION_WINDOW_UNMAXIMIZE),
     BSPL_ENUM("WindowFullscreen", WLMAKER_ACTION_WINDOW_FULLSCREEN),
+    BSPL_ENUM("WindowMinimize", WLMAKER_ACTION_WINDOW_MINIMIZE),
     BSPL_ENUM("WindowShade", WLMAKER_ACTION_WINDOW_SHADE),
     BSPL_ENUM("WindowUnshade", WLMAKER_ACTION_WINDOW_UNSHADE),
     BSPL_ENUM("WindowClose", WLMAKER_ACTION_WINDOW_CLOSE),
@@ -353,6 +354,15 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
         window_ptr = wlmtk_workspace_get_activated_window(workspace_ptr);
         if (NULL != window_ptr) {
             wlmtk_window_request_fullscreen(window_ptr, true);
+        }
+        break;
+
+    case WLMAKER_ACTION_WINDOW_MINIMIZE:
+        workspace_ptr = wlmtk_root_get_current_workspace(
+            server_ptr->root_ptr);
+        window_ptr = wlmtk_workspace_get_activated_window(workspace_ptr);
+        if (NULL != window_ptr) {
+            wlmtk_window_request_minimize(window_ptr);
         }
         break;
 

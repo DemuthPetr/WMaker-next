@@ -44,6 +44,7 @@ set(public_header_files
   corner.h
   dock.h
   files.h
+  icon_area.h
   icon_manager.h
   idle.h
   input_observation.h
@@ -73,6 +74,7 @@ target_sources(wlmaker_lib PRIVATE
   corner.c
   dock.c
   files.c
+  icon_area.c
   icon_manager.c
   idle.c
   input_observation.c

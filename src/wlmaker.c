@@ -46,6 +46,7 @@
 #include "clip.h"
 #include "config.h"
 #include "dock.h"
+#include "icon_area.h"
 #include "files.h"
 #include "root_menu.h"
 #include "server.h"
@@ -311,6 +312,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
 {
     wlmaker_dock_t            *dock_ptr = NULL;
     wlmaker_clip_t            *clip_ptr = NULL;
+    wlmaker_icon_area_t       *icon_area_ptr = NULL;
     wlmaker_task_list_t       *task_list_ptr = NULL;
     int                       rv = EXIT_SUCCESS;
 
@@ -447,10 +449,13 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
             server_ptr, state_dict_ptr, &style);
         clip_ptr = wlmaker_clip_create(
             server_ptr, state_dict_ptr, &style);
+        icon_area_ptr = wlmaker_icon_area_create(server_ptr, &style);
         task_list_ptr = wlmaker_task_list_create(
             server_ptr, &style.task_list);
-        if (NULL == dock_ptr || NULL == clip_ptr || NULL == task_list_ptr) {
-            bs_log(BS_ERROR, "Failed to create dock, clip or task list.");
+        if (NULL == dock_ptr || NULL == clip_ptr || NULL == icon_area_ptr ||
+            NULL == task_list_ptr) {
+            bs_log(BS_ERROR,
+                   "Failed to create dock, clip, icon area or task list.");
         } else {
             wl_display_run(server_ptr->wl_display_ptr);
         }
@@ -461,6 +466,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     }
 
     if (NULL != task_list_ptr) wlmaker_task_list_destroy(task_list_ptr);
+    if (NULL != icon_area_ptr) wlmaker_icon_area_destroy(icon_area_ptr);
     if (NULL != clip_ptr) wlmaker_clip_destroy(clip_ptr);
     if (NULL != dock_ptr) wlmaker_dock_destroy(dock_ptr);
     wlmaker_action_unbind_keys(action_handle_ptr);

@@ -134,6 +134,8 @@ struct _wlmtk_window_t {
     bool                      fullscreen;
     /** Whether this window is currently in maximized state. */
     bool                      maximized;
+    /** Whether this window is currently minimized (iconified). */
+    bool                      minimized;
     /** Whether this window is currently shaded. */
     bool                      shaded;
     /** Whether this window is currently activated (has keyboard focus). */
@@ -573,7 +575,22 @@ void wlmtk_window_request_close(wlmtk_window_t *window_ptr)
 /* ------------------------------------------------------------------------- */
 void wlmtk_window_request_minimize(wlmtk_window_t *window_ptr)
 {
-    bs_log(BS_ERROR, "TODO: Request minimize for window %p", window_ptr);
+    if (NULL == window_ptr->workspace_ptr) return;
+    wlmtk_workspace_minimize_window(window_ptr->workspace_ptr, window_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmtk_window_is_minimized(wlmtk_window_t *window_ptr)
+{
+    return window_ptr->minimized;
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_window_set_minimized(wlmtk_window_t *window_ptr, bool minimized)
+{
+    if (window_ptr->minimized == minimized) return;
+    window_ptr->minimized = minimized;
+    wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
 }
 
 /* ------------------------------------------------------------------------- */

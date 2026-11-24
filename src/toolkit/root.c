@@ -211,6 +211,7 @@ wlmtk_root_t *wlmtk_root_create(
     wl_signal_init(&root_ptr->events.unlock_event);
     wl_signal_init(&root_ptr->events.window_mapped);
     wl_signal_init(&root_ptr->events.window_unmapped);
+    wl_signal_init(&root_ptr->events.window_minimize_changed);
     wl_signal_init(&root_ptr->events.unclaimed_button_event);
     return root_ptr;
 }

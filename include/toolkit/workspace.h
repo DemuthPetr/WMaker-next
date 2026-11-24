@@ -177,6 +177,27 @@ void wlmtk_workspace_unmap_window(wlmtk_workspace_t *workspace_ptr,
                                    wlmtk_window_t *window_ptr);
 
 /**
+ * Minimizes the window: Hides it and passes activation on to the next
+ * window. The window remains mapped to the workspace. Raises
+ * @ref wlmtk_root_events_t::window_minimize_changed.
+ *
+ * @param workspace_ptr
+ * @param window_ptr
+ */
+void wlmtk_workspace_minimize_window(wlmtk_workspace_t *workspace_ptr,
+                                      wlmtk_window_t *window_ptr);
+
+/**
+ * Restores a minimized window: Shows, raises and activates it. Raises
+ * @ref wlmtk_root_events_t::window_minimize_changed.
+ *
+ * @param workspace_ptr
+ * @param window_ptr
+ */
+void wlmtk_workspace_restore_window(wlmtk_workspace_t *workspace_ptr,
+                                     wlmtk_window_t *window_ptr);
+
+/**
  * Sets the window's position.
  *
  * @param workspace_ptr
