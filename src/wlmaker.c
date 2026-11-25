@@ -30,6 +30,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <signal.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wayland-server-core.h>
@@ -407,8 +409,28 @@ static void _wlmaker_test_actions_start(wlmaker_server_t *server_ptr)
     _wlmaker_test_actions_next(&ta);
 }
 
+/* ------------------------------------------------------------------------- */
+/**
+ * Runs in each child right after fork(), before it execs: Gives it a clean
+ * signal state. wlmaker blocks SIGCHLD for its event loop (signalfd); the
+ * mask survives exec, so launched apps couldn't wait for their own children
+ * (Konsole failed to start its shell, after a long timeout).
+ */
+static void _wlmaker_child_reset_signals(void)
+{
+    sigset_t empty;
+    sigemptyset(&empty);
+    sigprocmask(SIG_SETMASK, &empty, NULL);
+    // Handlers would be reset by exec; ignored signals (SIGPIPE) are not.
+    signal(SIGPIPE, SIG_DFL);
+    signal(SIGCHLD, SIG_DFL);
+}
+
 int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
 {
+    // Every process we start (apps, menus, Xwayland) starts unblocked.
+    pthread_atfork(NULL, NULL, _wlmaker_child_reset_signals);
+
     wlmaker_dock_t            *dock_ptr = NULL;
     wlmaker_clip_t            *clip_ptr = NULL;
     wlmaker_icon_area_t       *icon_area_ptr = NULL;
