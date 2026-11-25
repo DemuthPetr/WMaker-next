@@ -623,8 +623,16 @@ void wlmtk_window_request_close(wlmtk_window_t *window_ptr)
 /* ------------------------------------------------------------------------- */
 void wlmtk_window_request_minimize(wlmtk_window_t *window_ptr)
 {
+    // Menus and the like (not iconifiable) don't minimize.
+    if (!wlmtk_window_is_iconifiable(window_ptr)) return;
     if (NULL == window_ptr->workspace_ptr) return;
     wlmtk_workspace_minimize_window(window_ptr->workspace_ptr, window_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmtk_window_is_iconifiable(wlmtk_window_t *window_ptr)
+{
+    return 0 != (window_ptr->properties & WLMTK_WINDOW_PROPERTY_ICONIFIABLE);
 }
 
 /* ------------------------------------------------------------------------- */

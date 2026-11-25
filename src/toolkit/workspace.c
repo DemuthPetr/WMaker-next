@@ -175,6 +175,7 @@ static void _wlmtk_workspace_show_animation_done(
     wlmtk_element_t *element_ptr,
     void *ud_ptr);
 static double _wlmtk_workspace_target_opacity(wlmtk_window_t *window_ptr);
+static bool _wlmtk_workspace_skip_cycling(wlmtk_window_t *window_ptr);
 
 static bool pfsm_move_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
 static bool pfsm_move_motion(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
@@ -916,13 +917,13 @@ void wlmtk_workspace_activate_previous_window(
     // Skip minimized windows: Cycling must not restore them on the way.
     for (size_t n = bs_dllist_size(&workspace_ptr->windows);
          NULL != dlnode_ptr && 0 < n &&
-             wlmtk_window_is_minimized(wlmtk_window_from_dlnode(dlnode_ptr));
+             _wlmtk_workspace_skip_cycling(wlmtk_window_from_dlnode(dlnode_ptr));
          --n) {
         dlnode_ptr = dlnode_ptr->prev_ptr;
         if (NULL == dlnode_ptr) dlnode_ptr = workspace_ptr->windows.tail_ptr;
     }
     if (NULL != dlnode_ptr &&
-        wlmtk_window_is_minimized(wlmtk_window_from_dlnode(dlnode_ptr))) {
+        _wlmtk_workspace_skip_cycling(wlmtk_window_from_dlnode(dlnode_ptr))) {
         return;
     }
 
@@ -948,13 +949,13 @@ void wlmtk_workspace_activate_next_window(
     // Skip minimized windows: Cycling must not restore them on the way.
     for (size_t n = bs_dllist_size(&workspace_ptr->windows);
          NULL != dlnode_ptr && 0 < n &&
-             wlmtk_window_is_minimized(wlmtk_window_from_dlnode(dlnode_ptr));
+             _wlmtk_workspace_skip_cycling(wlmtk_window_from_dlnode(dlnode_ptr));
          --n) {
         dlnode_ptr = dlnode_ptr->next_ptr;
         if (NULL == dlnode_ptr) dlnode_ptr = workspace_ptr->windows.head_ptr;
     }
     if (NULL != dlnode_ptr &&
-        wlmtk_window_is_minimized(wlmtk_window_from_dlnode(dlnode_ptr))) {
+        _wlmtk_workspace_skip_cycling(wlmtk_window_from_dlnode(dlnode_ptr))) {
         return;
     }
 
@@ -1046,6 +1047,14 @@ double _wlmtk_workspace_target_opacity(wlmtk_window_t *window_ptr)
     const wlmtk_effects_t *e = wlmtk_effects_get();
     return wlmtk_window_is_activated(window_ptr) ?
         e->active_opacity : e->inactive_opacity;
+}
+
+/* ------------------------------------------------------------------------- */
+/** Window cycling skips minimized windows, and menus (not iconifiable). */
+bool _wlmtk_workspace_skip_cycling(wlmtk_window_t *window_ptr)
+{
+    return wlmtk_window_is_minimized(window_ptr) ||
+        !wlmtk_window_is_iconifiable(window_ptr);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -2060,12 +2069,14 @@ void test_minimize_restore(bs_test_t *test_ptr)
     BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, fe1_ptr);
     wlmtk_window_t *w1 = wlmtk_test_window_create(&fe1_ptr->element);
     BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, w1);
+    wlmtk_window_set_properties(w1, WLMTK_WINDOW_PROPERTY_ICONIFIABLE);
     wlmtk_workspace_map_window(ws_ptr, w1);
 
     wlmtk_fake_element_t *fe2_ptr = wlmtk_fake_element_create();
     BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, fe2_ptr);
     wlmtk_window_t *w2 = wlmtk_test_window_create(&fe2_ptr->element);
     BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, w2);
+    wlmtk_window_set_properties(w2, WLMTK_WINDOW_PROPERTY_ICONIFIABLE);
     wlmtk_workspace_map_window(ws_ptr, w2);
     BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_is_activated(w2));
 
@@ -2138,6 +2149,7 @@ void test_activate_cycling(bs_test_t *test_ptr)
 
     // Window 1 gets mapped: Activated and on top.
     wlmtk_window_t *w1 = wlmtk_test_window_create(NULL);
+    wlmtk_window_set_properties(w1, WLMTK_WINDOW_PROPERTY_ICONIFIABLE);
     wlmtk_workspace_map_window(ws_ptr, w1);
     BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_is_activated(w1));
     BS_TEST_VERIFY_EQ(
@@ -2145,6 +2157,7 @@ void test_activate_cycling(bs_test_t *test_ptr)
 
     // Window 2 gets mapped: Activated and on top.
     wlmtk_window_t *w2 = wlmtk_test_window_create(NULL);
+    wlmtk_window_set_properties(w2, WLMTK_WINDOW_PROPERTY_ICONIFIABLE);
     wlmtk_workspace_map_window(ws_ptr, w2);
     BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_is_activated(w2));
     BS_TEST_VERIFY_EQ(
@@ -2152,6 +2165,7 @@ void test_activate_cycling(bs_test_t *test_ptr)
 
     // Window 3 gets mapped: Activated and on top.
     wlmtk_window_t *w3 = wlmtk_test_window_create(NULL);
+    wlmtk_window_set_properties(w3, WLMTK_WINDOW_PROPERTY_ICONIFIABLE);
     wlmtk_workspace_map_window(ws_ptr, w3);
     BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_is_activated(w3));
     BS_TEST_VERIFY_EQ(

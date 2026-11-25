@@ -429,6 +429,12 @@ void wlmtk_window_request_shaded(wlmtk_window_t *window_ptr, bool shaded);
 /** @return whether the window currently is shaded. */
 bool wlmtk_window_is_shaded(wlmtk_window_t *window_ptr);
 
+/**
+ * @return whether the window can be minimized (iconified). Application
+ *     windows can; menus and other internal windows can't.
+ */
+bool wlmtk_window_is_iconifiable(wlmtk_window_t *window_ptr);
+
 /** @return whether the window currently is minimized. */
 bool wlmtk_window_is_minimized(wlmtk_window_t *window_ptr);
 

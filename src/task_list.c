@@ -331,7 +331,8 @@ int _wlmaker_task_list_windows(
          NULL != dlnode_ptr;
          dlnode_ptr = dlnode_ptr->next_ptr) {
         wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(dlnode_ptr);
-        if (wlmtk_window_is_minimized(window_ptr)) continue;
+        if (wlmtk_window_is_minimized(window_ptr) ||
+            !wlmtk_window_is_iconifiable(window_ptr)) continue;
         if (window_ptr == active_ptr) active_pos = total;
         ++total;
     }
@@ -347,7 +348,8 @@ int _wlmaker_task_list_windows(
          NULL != dlnode_ptr && n < max_windows;
          dlnode_ptr = dlnode_ptr->next_ptr) {
         wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(dlnode_ptr);
-        if (wlmtk_window_is_minimized(window_ptr)) continue;
+        if (wlmtk_window_is_minimized(window_ptr) ||
+            !wlmtk_window_is_iconifiable(window_ptr)) continue;
         if (i++ < first) continue;
         if (window_ptr == active_ptr) *active_index_ptr = n;
         windows_ptr[n++] = window_ptr;
