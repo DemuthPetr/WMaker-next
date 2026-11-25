@@ -975,8 +975,12 @@ void wlmtk_workspace_raise_window(
                      wlmtk_dlnode_from_window(window_ptr));
     bs_dllist_push_front(&workspace_ptr->windows,
                          wlmtk_dlnode_from_window(window_ptr));
-    wlmtk_container_raise_element_to_top(&workspace_ptr->window_container,
-                                         wlmtk_window_element(window_ptr));
+    // Fullscreen windows (eg. a video) live in the fullscreen container.
+    wlmtk_container_raise_element_to_top(
+        wlmtk_window_is_fullscreen(window_ptr) ?
+        &workspace_ptr->fullscreen_container :
+        &workspace_ptr->window_container,
+        wlmtk_window_element(window_ptr));
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1469,6 +1473,7 @@ static void test_enable(bs_test_t *test_ptr);
 static void test_activate(bs_test_t *test_ptr);
 static void test_activate_cycling(bs_test_t *test_ptr);
 static void test_minimize_restore(bs_test_t *test_ptr);
+static void test_raise_fullscreen(bs_test_t *test_ptr);
 static void test_multi_output_extents(bs_test_t *test_ptr);
 static void test_multi_output_reposition(bs_test_t *test_ptr);
 static void test_window_position(bs_test_t *test_ptr);
@@ -1489,6 +1494,7 @@ static const bs_test_case_t _wlmtk_workspace_test_cases[] = {
     { 1, "activate", test_activate },
     { 1, "activate_cycling", test_activate_cycling },
     { 1, "minimize_restore", test_minimize_restore },
+    { 1, "raise_fullscreen", test_raise_fullscreen },
     { 1, "multi_output_extents", test_multi_output_extents },
     { 1, "multi_output_reposition", test_multi_output_reposition },
     { 1, "window_position", test_window_position },
@@ -2121,6 +2127,57 @@ void test_minimize_restore(bs_test_t *test_ptr)
     wlmtk_workspace_unmap_window(ws_ptr, w2);
     wlmtk_window_destroy(w2);
     wlmtk_element_destroy(&fe2_ptr->element);
+    wlmtk_window_destroy(w1);
+    wlmtk_element_destroy(&fe1_ptr->element);
+    wlmtk_workspace_destroy(ws_ptr);
+    wl_display_destroy(display_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+/** Raising a fullscreen window (eg. after Alt+Tab) raises it in its container. */
+void test_raise_fullscreen(bs_test_t *test_ptr)
+{
+    struct wl_display *display_ptr = wl_display_create();
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, display_ptr);
+    struct wlr_output_layout *wlr_output_layout_ptr =
+        wlr_output_layout_create(display_ptr);
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, wlr_output_layout_ptr);
+    struct wlr_output output = { .width = 1024, .height = 768, .scale = 1 };
+    wlmtk_test_wlr_output_init(&output);
+    wlr_output_layout_add(wlr_output_layout_ptr, &output, 0, 0);
+
+    wlmtk_workspace_t *ws_ptr = wlmtk_workspace_create(
+        wlr_output_layout_ptr, "t", &_wlmtk_workspace_test_tile_style);
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, ws_ptr);
+    wlmtk_element_set_visible(wlmtk_workspace_element(ws_ptr), true);
+    wlmtk_workspace_enable(ws_ptr, true);
+
+    wlmtk_fake_element_t *fe1_ptr = wlmtk_fake_element_create();
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, fe1_ptr);
+    wlmtk_window_t *w1 = wlmtk_test_window_create(&fe1_ptr->element);
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, w1);
+    wlmtk_workspace_map_window(ws_ptr, w1);
+    wlmtk_fake_element_t *fe2_ptr = wlmtk_fake_element_create();
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, fe2_ptr);
+    wlmtk_window_t *w2 = wlmtk_test_window_create(&fe2_ptr->element);
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, w2);
+    wlmtk_workspace_map_window(ws_ptr, w2);
+
+    wlmtk_window_commit_fullscreen(w1, true);
+    BS_TEST_VERIFY_EQ(
+        test_ptr, &ws_ptr->fullscreen_container,
+        wlmtk_window_element(w1)->parent_container_ptr);
+    wlmtk_workspace_raise_window(ws_ptr, w1);
+    BS_TEST_VERIFY_EQ(
+        test_ptr, wlmtk_dlnode_from_window(w1), ws_ptr->windows.head_ptr);
+    wlmtk_workspace_raise_window(ws_ptr, w2);
+    BS_TEST_VERIFY_EQ(
+        test_ptr, wlmtk_dlnode_from_window(w2), ws_ptr->windows.head_ptr);
+
+    wlmtk_workspace_unmap_window(ws_ptr, w2);
+    wlmtk_window_destroy(w2);
+    wlmtk_element_destroy(&fe2_ptr->element);
+    wlmtk_workspace_unmap_window(ws_ptr, w1);
     wlmtk_window_destroy(w1);
     wlmtk_element_destroy(&fe1_ptr->element);
     wlmtk_workspace_destroy(ws_ptr);
