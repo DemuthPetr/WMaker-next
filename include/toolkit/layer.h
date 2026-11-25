@@ -99,6 +99,21 @@ void wlmtk_layer_remove_panel(wlmtk_layer_t *layer_ptr,
 void wlmtk_layer_reconfigure(wlmtk_layer_t *layer_ptr);
 
 /**
+ * Retrieves the area of `wlr_output_ptr` that's left after the exclusive
+ * zones of this layer's panels (eg. a panel bar).
+ *
+ * @param layer_ptr
+ * @param wlr_output_ptr
+ * @param usable_area_ptr
+ *
+ * @return true if the output is known to the layer and was configured.
+ */
+bool wlmtk_layer_get_usable_area(
+    wlmtk_layer_t *layer_ptr,
+    struct wlr_output *wlr_output_ptr,
+    struct wlr_box *usable_area_ptr);
+
+/**
  * Calls @ref wlmtk_panel_compute_dimensions for each contained panel.
  *
  * The Wayland protocol spells it is 'undefined' how panels (layer shells)

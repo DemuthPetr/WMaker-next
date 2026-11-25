@@ -57,7 +57,8 @@ typedef struct {
      * - @ref wlmtk_window_is_shaded
      *
      * The signal is also raised when the window's workspace is changed.
-     * Retrieve through @ref wlmtk_window_get_workspace.
+     * Retrieve through @ref wlmtk_window_get_workspace. And when the title
+     * or the application ID change.
      *
      * data_ptr points to the window state (@ref wlmtk_window_t).
      */
@@ -432,6 +433,20 @@ bool wlmtk_window_is_minimized(wlmtk_window_t *window_ptr);
  * @param minimized
  */
 void wlmtk_window_set_minimized(wlmtk_window_t *window_ptr, bool minimized);
+
+/**
+ * Marks a minimized window as minimized by "Show Desktop", so toggling it
+ * again restores the window. Cleared when the window gets restored.
+ *
+ * @param window_ptr
+ * @param value
+ */
+void wlmtk_window_set_minimized_by_show_desktop(
+    wlmtk_window_t *window_ptr,
+    bool value);
+
+/** @return whether "Show Desktop" minimized the window. */
+bool wlmtk_window_is_minimized_by_show_desktop(wlmtk_window_t *window_ptr);
 
 /**
  * En-/Disables the window menu.

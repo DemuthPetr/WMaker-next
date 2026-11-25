@@ -457,10 +457,26 @@ struct wlr_box wlmtk_workspace_get_maximize_extents(
         &extents);
 
     if (!wlr_box_empty(&extents)) {
+        // Keep clear of exclusive zones of panels (eg. a bar) in any layer.
+        wlmtk_layer_t *layers[] = {
+            workspace_ptr->background_layer_ptr, workspace_ptr->bottom_layer_ptr,
+            workspace_ptr->top_layer_ptr, workspace_ptr->overlay_layer_ptr };
+        for (size_t i = 0; i < sizeof(layers) / sizeof(layers[0]); ++i) {
+            struct wlr_box usable;
+            if (NULL == layers[i] ||
+                !wlmtk_layer_get_usable_area(layers[i], wlr_output_ptr, &usable)) {
+                continue;
+            }
+            struct wlr_box intersection;
+            if (wlr_box_intersection(&intersection, &extents, &usable)) {
+                extents = intersection;
+            }
+        }
+
         // TODO(kaeser@gubbe.ch): Well, actually compute something sensible.
+        // Leaves room for dock and clip (they don't reserve a zone).
         extents.width -= workspace_ptr->tile_style.size;
         extents.height -= workspace_ptr->tile_style.size;
-
     }
     return extents;
 }
@@ -1203,9 +1219,14 @@ void _wlmtk_workspace_place_window(wlmtk_workspace_t *workspace_ptr,
     struct wlr_box extents = wlmtk_workspace_get_maximize_extents(
         workspace_ptr, wlmtk_window_get_wlr_output(window_ptr));
 
-    int x = wbox.x;
-    for (; wbox.y + 1 < extents.height; wbox.y += wbox.height) {
-        for (wbox.x = x; wbox.x + 1 < extents.width; wbox.x += wbox.width) {
+    // Search within the usable area (it may start below a panel bar).
+    int x = BS_MAX(wbox.x, extents.x);
+    for (wbox.y = BS_MAX(wbox.y, extents.y);
+         wbox.y + 1 < extents.y + extents.height;
+         wbox.y += wbox.height) {
+        for (wbox.x = x;
+             wbox.x + 1 < extents.x + extents.width;
+             wbox.x += wbox.width) {
             if (!wlr_box_contains_box(&extents, &wbox)) continue;
             if (!bs_dllist_any(&workspace_ptr->windows,
                                _wlmtk_workspace_window_overlaps,
@@ -1224,7 +1245,7 @@ void _wlmtk_workspace_place_window(wlmtk_workspace_t *workspace_ptr,
     unsigned steps = workspace_ptr->position_counter++ % max_steps + 1;
     wlmtk_element_set_position(
         wlmtk_window_element(window_ptr),
-        steps * n, steps * n);
+        extents.x + (int)(steps * n), extents.y + (int)(steps * n));
 }
 
 /* ------------------------------------------------------------------------- */

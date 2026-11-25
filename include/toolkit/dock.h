@@ -110,6 +110,40 @@ void wlmtk_dock_remove_tile(
     wlmtk_dock_t *dock_ptr,
     wlmtk_tile_t *tile_ptr);
 
+/** Maximum number of lines (rows or columns) of tiles in a dock. */
+#define WLMTK_DOCK_MAX_LINES 3
+
+/**
+ * Arranges the tiles in `lines` lines (columns of a dock at the left or
+ * right edge; rows at the top or bottom).
+ *
+ * @param dock_ptr
+ * @param lines               1 .. @ref WLMTK_DOCK_MAX_LINES.
+ * @param snake               Whether every other line runs back toward the
+ *                            anchor, continuing where the previous ended.
+ */
+void wlmtk_dock_set_lines(wlmtk_dock_t *dock_ptr, int lines, bool snake);
+
+/**
+ * Moves the tile to position `index` in the dock's order.
+ *
+ * @param dock_ptr
+ * @param tile_ptr            Must be a tile of the dock.
+ * @param index               Position; beyond the end means: last.
+ */
+void wlmtk_dock_move_tile(
+    wlmtk_dock_t *dock_ptr,
+    wlmtk_tile_t *tile_ptr,
+    size_t index);
+
+/** @return Position of the tile in the dock's order, or SIZE_MAX. */
+size_t wlmtk_dock_tile_index(wlmtk_dock_t *dock_ptr, wlmtk_tile_t *tile_ptr);
+
+/**
+ * @return The tile at the given layout (scene) coordinates, or NULL.
+ */
+wlmtk_tile_t *wlmtk_dock_tile_at(wlmtk_dock_t *dock_ptr, double x, double y);
+
 /** @return Pointer to the superclass @ref wlmtk_panel_t of `dock_ptr`. */
 wlmtk_panel_t *wlmtk_dock_panel(wlmtk_dock_t *dock_ptr);
 

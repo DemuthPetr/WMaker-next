@@ -477,6 +477,7 @@ bool wlmtk_window_set_title(
         wlmtk_titlebar_set_title(window_ptr->titlebar_ptr,
                                  window_ptr->title_ptr);
     }
+    wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
     return true;
 }
 
@@ -497,6 +498,7 @@ void wlmtk_window_set_app_id(
     if (NULL != app_id_ptr && *app_id_ptr) {
         window_ptr->app_id_ptr = logged_strdup(app_id_ptr);
     }
+    wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
 }
 
 /* ------------------------------------------------------------------------- */
