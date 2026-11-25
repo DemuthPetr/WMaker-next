@@ -31,7 +31,12 @@
 #include <stdint.h>
 #include <sys/stat.h>
 
+#define WLR_USE_UNSTABLE
+#include <wlr/types/wlr_scene.h>
+#undef WLR_USE_UNSTABLE
+
 #include "action.h"
+#include "server.h"
 #include "toolkit/toolkit.h"
 
 /* == Declarations ========================================================= */
@@ -57,6 +62,26 @@ struct _wlmaker_launcher_t {
     char                      *action_ptr;
     /** Server, for executing `action_ptr`. */
     wlmaker_server_t          *server_ptr;
+
+    /** Drag & drop: Left button is pressed on the launcher. */
+    bool                      pressed;
+    /** Drag & drop: The pointer moved far enough: It's a drag. */
+    bool                      dragging;
+    /** Drag & drop: A drag ended; don't launch on the click following. */
+    bool                      suppress_click;
+    /** Drag & drop: Pointer position at press, local coordinates. */
+    double                    press_x, press_y;
+    /** Called when a drag ends, with the pointer's layout position. */
+    void (*drop_fn)(void *ud_ptr, wlmaker_launcher_t *launcher_ptr,
+                    double x, double y);
+    /** Argument for `drop_fn`. */
+    void                      *drop_ud_ptr;
+    /** Pending drop, run when idle: The dock re-arranges this very tile. */
+    struct wl_event_source    *drop_idle_ptr;
+    /** Layout position of the pending drop. */
+    double                    drop_x, drop_y;
+    /** The launcher's plist definition, for saving the dock's order. */
+    bspl_dict_t               *dict_ptr;
     /** Path to the icon. */
     char                      *icon_path_ptr;
 
@@ -91,6 +116,12 @@ static void _wlmaker_launcher_element_destroy(
 static bool _wlmaker_launcher_pointer_button(
     wlmtk_element_t *element_ptr,
     const wlmtk_button_event_t *button_event_ptr);
+static bool _wlmaker_launcher_pointer_accepts_motion(
+    wlmtk_element_t *element_ptr,
+    wlmtk_pointer_motion_event_t *motion_event_ptr);
+static void _wlmaker_launcher_pointer_grab_cancel(
+    wlmtk_element_t *element_ptr);
+static void _wlmaker_launcher_drop_idle(void *data_ptr);
 
 static void _wlmaker_launcher_start(wlmaker_launcher_t *launcher_ptr);
 
@@ -126,6 +157,8 @@ static bool _wlmaker_launcher_set_content_size(
 static const wlmtk_element_vmt_t _wlmaker_launcher_element_vmt = {
     .destroy = _wlmaker_launcher_element_destroy,
     .pointer_button = _wlmaker_launcher_pointer_button,
+    .pointer_accepts_motion = _wlmaker_launcher_pointer_accepts_motion,
+    .pointer_grab_cancel = _wlmaker_launcher_pointer_grab_cancel,
 };
 
 /** Launcher's extension to @ref wlmtk_tile_t virtual method table. */
@@ -184,6 +217,7 @@ wlmaker_launcher_t *wlmaker_launcher_create_from_plist(
         &launcher_ptr->super_tile,
         wlmtk_buffer_element(&launcher_ptr->overlay_buffer));
 
+    launcher_ptr->dict_ptr = bspl_dict_ref(dict_ptr);
     if (!bspl_decode_dict(
             dict_ptr, _wlmaker_launcher_plist_desc, launcher_ptr)) {
         bs_log(BS_ERROR, "Failed to create launcher from plist dict.");
@@ -239,6 +273,10 @@ wlmaker_launcher_t *wlmaker_launcher_create_from_plist(
 /* ------------------------------------------------------------------------- */
 void wlmaker_launcher_destroy(wlmaker_launcher_t *launcher_ptr)
 {
+    if (NULL != launcher_ptr->drop_idle_ptr) {
+        wl_event_source_remove(launcher_ptr->drop_idle_ptr);
+        launcher_ptr->drop_idle_ptr = NULL;
+    }
     if (NULL != launcher_ptr->image_ptr) {
         wlmtk_tile_set_content(&launcher_ptr->super_tile, NULL);
         wlmtk_image_destroy(launcher_ptr->image_ptr);
@@ -284,6 +322,10 @@ void wlmaker_launcher_destroy(wlmaker_launcher_t *launcher_ptr)
         free(launcher_ptr->action_ptr);
         launcher_ptr->action_ptr = NULL;
     }
+    if (NULL != launcher_ptr->dict_ptr) {
+        bspl_dict_unref(launcher_ptr->dict_ptr);
+        launcher_ptr->dict_ptr = NULL;
+    }
 
     if (NULL != launcher_ptr->icon_path_ptr) {
         free(launcher_ptr->icon_path_ptr);
@@ -300,6 +342,23 @@ void wlmaker_launcher_set_server(
     wlmaker_server_t *server_ptr)
 {
     launcher_ptr->server_ptr = server_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmaker_launcher_set_drop_handler(
+    wlmaker_launcher_t *launcher_ptr,
+    void (*drop_fn)(void *ud_ptr, wlmaker_launcher_t *launcher_ptr,
+                    double x, double y),
+    void *ud_ptr)
+{
+    launcher_ptr->drop_fn = drop_fn;
+    launcher_ptr->drop_ud_ptr = ud_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
+bspl_dict_t *wlmaker_launcher_dict(wlmaker_launcher_t *launcher_ptr)
+{
+    return launcher_ptr->dict_ptr;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -400,10 +459,100 @@ bool _wlmaker_launcher_pointer_button(
         super_tile.super_container.super_element);
 
     if (BTN_LEFT != button_event_ptr->button) return true;
-    if (WLMTK_BUTTON_CLICK != button_event_ptr->type) return true;
+    wlmtk_element_t *e = wlmtk_tile_element(&launcher_ptr->super_tile);
 
-    _wlmaker_launcher_start(launcher_ptr);
-    return true;
+    switch (button_event_ptr->type) {
+    case WLMTK_BUTTON_DOWN:
+        // A press may start a drag: Grab the pointer to follow it.
+        launcher_ptr->pressed = true;
+        launcher_ptr->dragging = false;
+        launcher_ptr->suppress_click = false;
+        launcher_ptr->press_x = e->last_pointer_motion_event.x;
+        launcher_ptr->press_y = e->last_pointer_motion_event.y;
+        if (NULL != launcher_ptr->drop_fn && NULL != e->parent_container_ptr) {
+            wlmtk_container_pointer_grab(e->parent_container_ptr, e);
+        }
+        return true;
+
+    case WLMTK_BUTTON_UP:
+        if (!launcher_ptr->pressed) return true;
+        launcher_ptr->pressed = false;
+        if (NULL != e->parent_container_ptr &&
+            e->parent_container_ptr->pointer_grab_element_ptr == e) {
+            wlmtk_container_pointer_grab_release(e->parent_container_ptr, e);
+        }
+        if (launcher_ptr->dragging) {
+            launcher_ptr->dragging = false;
+            launcher_ptr->suppress_click = true;
+            int x, y;
+            if (NULL != e->wlr_scene_node_ptr &&
+                wlr_scene_node_coords(e->wlr_scene_node_ptr, &x, &y) &&
+                NULL != launcher_ptr->server_ptr &&
+                NULL == launcher_ptr->drop_idle_ptr) {
+                launcher_ptr->drop_x = x + e->last_pointer_motion_event.x;
+                launcher_ptr->drop_y = y + e->last_pointer_motion_event.y;
+                launcher_ptr->drop_idle_ptr = wl_event_loop_add_idle(
+                    wl_display_get_event_loop(
+                        launcher_ptr->server_ptr->wl_display_ptr),
+                    _wlmaker_launcher_drop_idle, launcher_ptr);
+            }
+        }
+        return true;
+
+    case WLMTK_BUTTON_CLICK:
+        if (launcher_ptr->suppress_click) {
+            launcher_ptr->suppress_click = false;
+            return true;
+        }
+        _wlmaker_launcher_start(launcher_ptr);
+        return true;
+
+    default:
+        return true;
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+/** Tracks a press turning into a drag (more than a few pixels). */
+bool _wlmaker_launcher_pointer_accepts_motion(
+    wlmtk_element_t *element_ptr,
+    wlmtk_pointer_motion_event_t *motion_event_ptr)
+{
+    wlmaker_launcher_t *launcher_ptr = BS_CONTAINER_OF(
+        element_ptr, wlmaker_launcher_t,
+        super_tile.super_container.super_element);
+    bool rv = launcher_ptr->orig_element_vmt.pointer_accepts_motion(
+        element_ptr, motion_event_ptr);
+    if (launcher_ptr->pressed && !launcher_ptr->dragging) {
+        double dx = motion_event_ptr->x - launcher_ptr->press_x;
+        double dy = motion_event_ptr->y - launcher_ptr->press_y;
+        if (dx * dx + dy * dy > 8 * 8) launcher_ptr->dragging = true;
+    }
+    return rv;
+}
+
+/* ------------------------------------------------------------------------- */
+/** Runs the drop, once the toolkit is done dispatching the button event. */
+void _wlmaker_launcher_drop_idle(void *data_ptr)
+{
+    wlmaker_launcher_t *launcher_ptr = data_ptr;
+    launcher_ptr->drop_idle_ptr = NULL;  // One-shot: Already removed.
+    launcher_ptr->drop_fn(launcher_ptr->drop_ud_ptr, launcher_ptr,
+                          launcher_ptr->drop_x, launcher_ptr->drop_y);
+}
+
+/* ------------------------------------------------------------------------- */
+/** The pointer grab got cancelled: Abort a drag. */
+void _wlmaker_launcher_pointer_grab_cancel(wlmtk_element_t *element_ptr)
+{
+    wlmaker_launcher_t *launcher_ptr = BS_CONTAINER_OF(
+        element_ptr, wlmaker_launcher_t,
+        super_tile.super_container.super_element);
+    launcher_ptr->pressed = false;
+    launcher_ptr->dragging = false;
+    if (NULL != launcher_ptr->orig_element_vmt.pointer_grab_cancel) {
+        launcher_ptr->orig_element_vmt.pointer_grab_cancel(element_ptr);
+    }
 }
 
 /* ------------------------------------------------------------------------- */

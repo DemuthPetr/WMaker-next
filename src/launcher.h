@@ -68,6 +68,23 @@ void wlmaker_launcher_set_server(
     wlmaker_launcher_t *launcher_ptr,
     wlmaker_server_t *server_ptr);
 
+/**
+ * Enables drag & drop: `drop_fn` is called when the launcher is dragged and
+ * released, with the pointer's layout coordinates. Dragging won't launch.
+ *
+ * @param launcher_ptr
+ * @param drop_fn
+ * @param ud_ptr
+ */
+void wlmaker_launcher_set_drop_handler(
+    wlmaker_launcher_t *launcher_ptr,
+    void (*drop_fn)(void *ud_ptr, wlmaker_launcher_t *launcher_ptr,
+                    double x, double y),
+    void *ud_ptr);
+
+/** @return The launcher's plist definition. */
+bspl_dict_t *wlmaker_launcher_dict(wlmaker_launcher_t *launcher_ptr);
+
 /** @return A pointer to the @ref wlmtk_tile_t superclass of `launcher_ptr`. */
 wlmtk_tile_t *wlmaker_launcher_tile(wlmaker_launcher_t *launcher_ptr);
 
