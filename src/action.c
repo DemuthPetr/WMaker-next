@@ -98,6 +98,7 @@ static void _wlmaker_action_hide(
 static bool _wlmaker_action_theme_load_from_file(
     wlmaker_server_t *server_ptr,
     const char *fname_ptr);
+static void _wlmaker_action_show_desktop(wlmaker_server_t *server_ptr);
 
 /* == Data ================================================================= */
 
@@ -154,6 +155,7 @@ const bspl_enum_desc_t wlmaker_action_desc[] = {
     BSPL_ENUM("WindowMinimize", WLMAKER_ACTION_WINDOW_MINIMIZE),
     BSPL_ENUM("HideApplication", WLMAKER_ACTION_HIDE_APPLICATION),
     BSPL_ENUM("HideOthers", WLMAKER_ACTION_HIDE_OTHERS),
+    BSPL_ENUM("ShowDesktop", WLMAKER_ACTION_SHOW_DESKTOP),
     BSPL_ENUM("WindowShade", WLMAKER_ACTION_WINDOW_SHADE),
     BSPL_ENUM("WindowUnshade", WLMAKER_ACTION_WINDOW_UNSHADE),
     BSPL_ENUM("WindowClose", WLMAKER_ACTION_WINDOW_CLOSE),
@@ -396,6 +398,10 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
         }
         break;
 
+    case WLMAKER_ACTION_SHOW_DESKTOP:
+        _wlmaker_action_show_desktop(server_ptr);
+        break;
+
     case WLMAKER_ACTION_HIDE_APPLICATION:
     case WLMAKER_ACTION_HIDE_OTHERS:
         workspace_ptr = wlmtk_root_get_current_workspace(
@@ -591,6 +597,60 @@ bool _wlmaker_action_same_application(
     }
     pid_t pid1 = wlmtk_window_get_client_ptr(window1_ptr)->pid;
     return 0 != pid1 && pid1 == wlmtk_window_get_client_ptr(window2_ptr)->pid;
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Toggles "Show Desktop" on the current workspace, as in Plasma: Minimizes
+ * all windows; or, if none is left visible, restores those it minimized.
+ *
+ * @param server_ptr
+ */
+void _wlmaker_action_show_desktop(wlmaker_server_t *server_ptr)
+{
+    wlmtk_workspace_t *workspace_ptr = wlmtk_root_get_current_workspace(
+        server_ptr->root_ptr);
+    wlmtk_window_t *root_menu_window_ptr = NULL;
+    if (NULL != server_ptr->root_menu_ptr) {
+        root_menu_window_ptr = wlmaker_root_menu_window(
+            server_ptr->root_menu_ptr);
+    }
+    bs_dllist_t *windows_ptr = wlmtk_workspace_get_windows_dllist(
+        workspace_ptr);
+
+    bool any_visible = false;
+    for (bs_dllist_node_t *dlnode_ptr = windows_ptr->head_ptr;
+         NULL != dlnode_ptr;
+         dlnode_ptr = dlnode_ptr->next_ptr) {
+        wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(dlnode_ptr);
+        if (window_ptr == root_menu_window_ptr) continue;
+        any_visible |= !wlmtk_window_is_minimized(window_ptr);
+    }
+
+    if (any_visible) {
+        for (bs_dllist_node_t *dlnode_ptr = windows_ptr->head_ptr;
+             NULL != dlnode_ptr;
+             dlnode_ptr = dlnode_ptr->next_ptr) {
+            wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(dlnode_ptr);
+            if (window_ptr == root_menu_window_ptr ||
+                wlmtk_window_is_minimized(window_ptr)) continue;
+            wlmtk_window_request_minimize(window_ptr);
+            wlmtk_window_set_minimized_by_show_desktop(window_ptr, true);
+        }
+        return;
+    }
+
+    // Restore in reverse stacking order, so the topmost ends up on top.
+    for (bs_dllist_node_t *dlnode_ptr = windows_ptr->tail_ptr;
+         NULL != dlnode_ptr; ) {
+        // Restoring raises the window: It moves to the list's head.
+        bs_dllist_node_t *prev_ptr = dlnode_ptr->prev_ptr;
+        wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(dlnode_ptr);
+        if (wlmtk_window_is_minimized_by_show_desktop(window_ptr)) {
+            wlmtk_workspace_restore_window(workspace_ptr, window_ptr);
+        }
+        dlnode_ptr = prev_ptr;
+    }
 }
 
 /* ------------------------------------------------------------------------- */

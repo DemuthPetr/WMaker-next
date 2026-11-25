@@ -190,6 +190,7 @@ wlmaker_dock_t *wlmaker_dock_create(
             wlmaker_dock_destroy(dock_ptr);
             return NULL;
         }
+        wlmaker_launcher_set_server(launcher_ptr, server_ptr);
         wlmtk_dock_add_tile(
             dock_ptr->wlmtk_dock_ptr,
             wlmaker_launcher_tile(launcher_ptr));

@@ -58,6 +58,16 @@ wlmaker_launcher_t *wlmaker_launcher_create_from_plist(
  */
 void wlmaker_launcher_destroy(wlmaker_launcher_t *launcher_ptr);
 
+/**
+ * Sets the server, needed for launchers executing an `Action`.
+ *
+ * @param launcher_ptr
+ * @param server_ptr
+ */
+void wlmaker_launcher_set_server(
+    wlmaker_launcher_t *launcher_ptr,
+    wlmaker_server_t *server_ptr);
+
 /** @return A pointer to the @ref wlmtk_tile_t superclass of `launcher_ptr`. */
 wlmtk_tile_t *wlmaker_launcher_tile(wlmaker_launcher_t *launcher_ptr);
 

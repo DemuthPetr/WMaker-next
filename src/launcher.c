@@ -27,9 +27,11 @@
 #include <linux/input-event-codes.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdint.h>
 #include <sys/stat.h>
 
+#include "action.h"
 #include "toolkit/toolkit.h"
 
 /* == Declarations ========================================================= */
@@ -51,6 +53,10 @@ struct _wlmaker_launcher_t {
 
     /** Commandline to launch the associated application. */
     char                      *cmdline_ptr;
+    /** Alternatively: A wlmaker action to execute, eg. "ShowDesktop". */
+    char                      *action_ptr;
+    /** Server, for executing `action_ptr`. */
+    wlmaker_server_t          *server_ptr;
     /** Path to the icon. */
     char                      *icon_path_ptr;
 
@@ -68,7 +74,9 @@ struct _wlmaker_launcher_t {
 /** Plist descroptor for a launcher. */
 static const bspl_desc_t _wlmaker_launcher_plist_desc[] = {
     BSPL_DESC_STRING(
-        "CommandLine", true, wlmaker_launcher_t, cmdline_ptr, cmdline_ptr, ""),
+        "CommandLine", false, wlmaker_launcher_t, cmdline_ptr, cmdline_ptr, ""),
+    BSPL_DESC_STRING(
+        "Action", false, wlmaker_launcher_t, action_ptr, action_ptr, ""),
     BSPL_DESC_STRING(
         "Icon", true, wlmaker_launcher_t, icon_path_ptr, icon_path_ptr, ""),
     BSPL_DESC_SENTINEL(),
@@ -272,6 +280,10 @@ void wlmaker_launcher_destroy(wlmaker_launcher_t *launcher_ptr)
         free(launcher_ptr->cmdline_ptr);
         launcher_ptr->cmdline_ptr = NULL;
     }
+    if (NULL != launcher_ptr->action_ptr) {
+        free(launcher_ptr->action_ptr);
+        launcher_ptr->action_ptr = NULL;
+    }
 
     if (NULL != launcher_ptr->icon_path_ptr) {
         free(launcher_ptr->icon_path_ptr);
@@ -280,6 +292,14 @@ void wlmaker_launcher_destroy(wlmaker_launcher_t *launcher_ptr)
 
     wlmtk_tile_fini(&launcher_ptr->super_tile);
     free(launcher_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmaker_launcher_set_server(
+    wlmaker_launcher_t *launcher_ptr,
+    wlmaker_server_t *server_ptr)
+{
+    launcher_ptr->server_ptr = server_ptr;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -394,6 +414,20 @@ bool _wlmaker_launcher_pointer_button(
  */
 void _wlmaker_launcher_start(wlmaker_launcher_t *launcher_ptr)
 {
+    if (NULL != launcher_ptr->action_ptr && 0 != *launcher_ptr->action_ptr) {
+        for (const bspl_enum_desc_t *d = wlmaker_action_desc;
+             NULL != d->name_ptr; ++d) {
+            if (0 != strcmp(d->name_ptr, launcher_ptr->action_ptr)) continue;
+            if (NULL != launcher_ptr->server_ptr) {
+                wlmaker_action_execute(launcher_ptr->server_ptr, d->value, NULL);
+            }
+            return;
+        }
+        bs_log(BS_ERROR, "Launcher: Unknown action '%s'",
+               launcher_ptr->action_ptr);
+        return;
+    }
+
     bs_subprocess_t *subprocess_ptr = bs_subprocess_create_cmdline(
         launcher_ptr->cmdline_ptr);
     if (NULL == subprocess_ptr) {

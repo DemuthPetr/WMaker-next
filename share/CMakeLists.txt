@@ -205,6 +205,7 @@ install(FILES
   "wlmaker/icons/chromium-56x56.png"
   "wlmaker/icons/clip-56x56.png"
   "wlmaker/icons/firefox-56x56.png"
+  "wlmaker/icons/show-desktop-56x56.png"
   "wlmaker/icons/terminal-56x56.png"
   DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/wlmaker/icons")
 install(

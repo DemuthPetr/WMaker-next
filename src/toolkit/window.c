@@ -138,6 +138,8 @@ struct _wlmtk_window_t {
     bool                      maximized;
     /** Whether this window is currently minimized (iconified). */
     bool                      minimized;
+    /** Whether "Show Desktop" minimized it, to restore it on the toggle. */
+    bool                      minimized_by_show_desktop;
     /** Whether this window is currently shaded. */
     bool                      shaded;
     /** Whether this window is currently activated (has keyboard focus). */
@@ -610,10 +612,25 @@ bool wlmtk_window_is_minimized(wlmtk_window_t *window_ptr)
 }
 
 /* ------------------------------------------------------------------------- */
+void wlmtk_window_set_minimized_by_show_desktop(
+    wlmtk_window_t *window_ptr,
+    bool value)
+{
+    window_ptr->minimized_by_show_desktop = value && window_ptr->minimized;
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmtk_window_is_minimized_by_show_desktop(wlmtk_window_t *window_ptr)
+{
+    return window_ptr->minimized_by_show_desktop;
+}
+
+/* ------------------------------------------------------------------------- */
 void wlmtk_window_set_minimized(wlmtk_window_t *window_ptr, bool minimized)
 {
     if (window_ptr->minimized == minimized) return;
     window_ptr->minimized = minimized;
+    if (!minimized) window_ptr->minimized_by_show_desktop = false;
     wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
 }
 
