@@ -35,6 +35,7 @@
 #include <wlr/util/edges.h>
 #undef WLR_USE_UNSTABLE
 
+#include "app_icon.h"
 #include "backend/backend.h"
 #include "toolkit/toolkit.h"
 
@@ -92,7 +93,9 @@ static wlmaker_miniwindow_t *_wlmaker_miniwindow_create(
     wlmtk_window_t *window_ptr);
 static void _wlmaker_miniwindow_destroy(wlmaker_miniwindow_t *mw_ptr);
 static void _wlmaker_miniwindow_redraw(wlmaker_miniwindow_t *mw_ptr);
-static struct wlr_buffer *_wlmaker_miniwindow_create_content(int size);
+static struct wlr_buffer *_wlmaker_miniwindow_create_content(
+    int size,
+    const char *app_id_ptr);
 static struct wlr_buffer *_wlmaker_miniwindow_create_overlay(
     int size,
     const char *title_ptr);
@@ -291,7 +294,8 @@ void _wlmaker_miniwindow_destroy(wlmaker_miniwindow_t *mw_ptr)
 void _wlmaker_miniwindow_redraw(wlmaker_miniwindow_t *mw_ptr)
 {
     struct wlr_buffer *wlr_buffer_ptr = _wlmaker_miniwindow_create_content(
-        mw_ptr->super_tile.style.content_size);
+        mw_ptr->super_tile.style.content_size,
+        wlmtk_window_get_app_id(mw_ptr->window_ptr));
     if (NULL != wlr_buffer_ptr) {
         wlmtk_buffer_set(&mw_ptr->content_buffer, wlr_buffer_ptr);
         wlr_buffer_drop(wlr_buffer_ptr);
@@ -307,8 +311,13 @@ void _wlmaker_miniwindow_redraw(wlmaker_miniwindow_t *mw_ptr)
 }
 
 /* ------------------------------------------------------------------------- */
-/** Draws a stylized window: Frame, titlebar and buttons. Content area. */
-struct wlr_buffer *_wlmaker_miniwindow_create_content(int s)
+/**
+ * Draws the application's icon, below the overlay's title bar. Without an
+ * icon: A stylized window, with frame, titlebar, buttons and content.
+ */
+struct wlr_buffer *_wlmaker_miniwindow_create_content(
+    int s,
+    const char *app_id_ptr)
 {
     struct wlr_buffer *wlr_buffer_ptr = bs_gfxbuf_create_wlr_buffer(s, s);
     if (NULL == wlr_buffer_ptr) return NULL;
@@ -316,6 +325,22 @@ struct wlr_buffer *_wlmaker_miniwindow_create_content(int s)
     if (NULL == cairo_ptr) {
         wlr_buffer_drop(wlr_buffer_ptr);
         return NULL;
+    }
+
+    char *icon_path_ptr = wlmaker_app_icon_find(app_id_ptr);
+    if (NULL != icon_path_ptr) {
+        int icon_size = 0.72 * s;
+        cairo_surface_t *icon_ptr = wlmaker_app_icon_load(
+            icon_path_ptr, icon_size);
+        free(icon_path_ptr);
+        if (NULL != icon_ptr) {
+            cairo_set_source_surface(
+                cairo_ptr, icon_ptr, (s - icon_size) / 2, s - icon_size - 1);
+            cairo_paint(cairo_ptr);
+            cairo_surface_destroy(icon_ptr);
+            cairo_destroy(cairo_ptr);
+            return wlr_buffer_ptr;
+        }
     }
 
     // Leaves the top ~20% for the overlay's title.

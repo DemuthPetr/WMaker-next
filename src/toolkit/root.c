@@ -22,6 +22,7 @@
 #include "root.h"
 
 #include <libbase/libbase.h>
+#include <math.h>
 #include <stdlib.h>
 #include <wayland-server-protocol.h>
 #define WLR_USE_UNSTABLE
@@ -83,7 +84,21 @@ struct _wlmtk_root_t {
 
     /** Last recorded pointer movement. */
     wlmtk_pointer_motion_event_t mev;
+
+    /** Whether the `last_click` fields hold a click to pair a double-click. */
+    bool                      last_click_valid;
+    /** Button of the last click. */
+    uint32_t                  last_click_button;
+    /** Time of the last click, in milliseconds. */
+    uint32_t                  last_click_msec;
+    /** Pointer position at the last click. */
+    double                    last_click_x, last_click_y;
 };
+
+/** Maximum time between two clicks for a double-click, in milliseconds. */
+static const uint32_t _wlmtk_root_double_click_msec = 350;
+/** Maximum pointer travel between two clicks of a double-click, in pixels. */
+static const double _wlmtk_root_double_click_distance = 4.0;
 
 /** Listeners for a specific output. */
 struct wlmtk_root_output {
@@ -298,6 +313,27 @@ bool wlmtk_root_pointer_button(
         rv = wlmtk_element_pointer_button(
             &root_ptr->container.super_element, &event);
 
+        // A second click of the same button, soon and close: double-click.
+        if (root_ptr->last_click_valid &&
+            root_ptr->last_click_button == event.button &&
+            event.time_msec - root_ptr->last_click_msec <=
+            _wlmtk_root_double_click_msec &&
+            fabs(root_ptr->mev.x - root_ptr->last_click_x) <=
+            _wlmtk_root_double_click_distance &&
+            fabs(root_ptr->mev.y - root_ptr->last_click_y) <=
+            _wlmtk_root_double_click_distance) {
+            event.type = WLMTK_BUTTON_DOUBLE_CLICK;
+            rv |= wlmtk_element_pointer_button(
+                &root_ptr->container.super_element, &event);
+            root_ptr->last_click_valid = false;
+        } else {
+            root_ptr->last_click_valid = true;
+            root_ptr->last_click_button = event.button;
+            root_ptr->last_click_msec = event.time_msec;
+            root_ptr->last_click_x = root_ptr->mev.x;
+            root_ptr->last_click_y = root_ptr->mev.y;
+        }
+
         // Hack: Fix lost focus when a menu releases the pointer grab. This
         // should not be needed here, but needs a better means of updating
         // the pointer focus.
@@ -444,6 +480,28 @@ void wlmtk_root_switch_to_previous_workspace(wlmtk_root_t *root_ptr)
     }
     wlmtk_workspace_t *workspace_ptr = wlmtk_workspace_from_dlnode(dlnode_ptr);
 
+    _wlmtk_root_switch_to_workspace(root_ptr, workspace_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+wlmtk_workspace_t *wlmtk_root_get_workspace(
+    wlmtk_root_t *root_ptr,
+    size_t index)
+{
+    bs_dllist_node_t *dlnode_ptr = root_ptr->workspaces.head_ptr;
+    for (; NULL != dlnode_ptr && 0 < index; --index) {
+        dlnode_ptr = dlnode_ptr->next_ptr;
+    }
+    if (NULL == dlnode_ptr) return NULL;
+    return wlmtk_workspace_from_dlnode(dlnode_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_root_switch_to_workspace(
+    wlmtk_root_t *root_ptr,
+    wlmtk_workspace_t *workspace_ptr)
+{
+    if (NULL == workspace_ptr) return;
     _wlmtk_root_switch_to_workspace(root_ptr, workspace_ptr);
 }
 
@@ -1013,6 +1071,33 @@ void test_pointer_button(bs_test_t *test_ptr)
         &expected_event,
         &fake_element_ptr->pointer_button_event,
         sizeof(wlmtk_button_event_t));
+
+    // A second click, 200ms later: Also a double-click.
+    wlr_pointer_button_event.time_msec = 4521;
+    wlr_pointer_button_event.state = WL_POINTER_BUTTON_STATE_PRESSED;
+    wlmtk_root_pointer_button(root_ptr, &wlr_pointer_button_event, 0);
+    wlr_pointer_button_event.state = WL_POINTER_BUTTON_STATE_RELEASED;
+    wlmtk_root_pointer_button(root_ptr, &wlr_pointer_button_event, 0);
+    BS_TEST_VERIFY_EQ(test_ptr, WLMTK_BUTTON_DOUBLE_CLICK,
+                      fake_element_ptr->pointer_button_event.type);
+
+    // A third click right after: Only a click, it starts a new pair.
+    wlr_pointer_button_event.time_msec = 4621;
+    wlr_pointer_button_event.state = WL_POINTER_BUTTON_STATE_PRESSED;
+    wlmtk_root_pointer_button(root_ptr, &wlr_pointer_button_event, 0);
+    wlr_pointer_button_event.state = WL_POINTER_BUTTON_STATE_RELEASED;
+    wlmtk_root_pointer_button(root_ptr, &wlr_pointer_button_event, 0);
+    BS_TEST_VERIFY_EQ(test_ptr, WLMTK_BUTTON_CLICK,
+                      fake_element_ptr->pointer_button_event.type);
+
+    // A fourth click, too late for a double-click.
+    wlr_pointer_button_event.time_msec = 5621;
+    wlr_pointer_button_event.state = WL_POINTER_BUTTON_STATE_PRESSED;
+    wlmtk_root_pointer_button(root_ptr, &wlr_pointer_button_event, 0);
+    wlr_pointer_button_event.state = WL_POINTER_BUTTON_STATE_RELEASED;
+    wlmtk_root_pointer_button(root_ptr, &wlr_pointer_button_event, 0);
+    BS_TEST_VERIFY_EQ(test_ptr, WLMTK_BUTTON_CLICK,
+                      fake_element_ptr->pointer_button_event.type);
 
     wlmtk_container_remove_element(
         &root_ptr->container, &fake_element_ptr->element);

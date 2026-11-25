@@ -201,6 +201,28 @@ void wlmtk_root_switch_to_next_workspace(wlmtk_root_t *root_ptr);
 void wlmtk_root_switch_to_previous_workspace(wlmtk_root_t *root_ptr);
 
 /**
+ * Returns the workspace at `index` (0-based, in workspace order).
+ *
+ * @param root_ptr
+ * @param index
+ *
+ * @return The workspace, or NULL if there are fewer workspaces.
+ */
+wlmtk_workspace_t *wlmtk_root_get_workspace(
+    wlmtk_root_t *root_ptr,
+    size_t index);
+
+/**
+ * Switches to `workspace_ptr`. Does nothing if it is the current one.
+ *
+ * @param root_ptr
+ * @param workspace_ptr       Must be a workspace of `root_ptr`.
+ */
+void wlmtk_root_switch_to_workspace(
+    wlmtk_root_t *root_ptr,
+    wlmtk_workspace_t *workspace_ptr);
+
+/**
  * Runs |func()| for each workspace.
  *
  * @param root_ptr

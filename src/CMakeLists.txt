@@ -20,6 +20,7 @@ cmake_minimum_required(VERSION 3.13)
 # * libdisplay-info at 0.2.0
 # * pixman at pixman-0.43.0
 pkg_check_modules(WAYLAND_SERVER REQUIRED IMPORTED_TARGET wayland-server>=1.22.0)
+pkg_check_modules(RSVG REQUIRED IMPORTED_TARGET librsvg-2.0>=2.52)
 # We build for wlroots 0.18, 0.19 and (preparing for) 0.20.
 pkg_check_modules(WLROOTS IMPORTED_TARGET wlroots-0.20>=0.20)
 if(NOT WLROOTS_FOUND)
@@ -37,6 +38,7 @@ add_subdirectory(toolkit)
 set(public_header_files
   action.h
   action_item.h
+  app_icon.h
   background.h
   wlmbacktrace.h
   clip.h
@@ -60,6 +62,7 @@ set(public_header_files
   xdg_decoration.h
   xdg_popup.h
   xdg_shell.h
+  window_list.h
   xdg_toplevel.h
   xwl.h
   xwl_surface.h)
@@ -67,6 +70,7 @@ add_library(wlmaker_lib STATIC)
 target_sources(wlmaker_lib PRIVATE
   action.c
   action_item.c
+  app_icon.c
   background.c
   wlmbacktrace.c
   clip.c
@@ -91,6 +95,7 @@ target_sources(wlmaker_lib PRIVATE
   xdg_decoration.c
   xdg_popup.c
   xdg_shell.c
+  window_list.c
   xdg_toplevel.c
   xwl.c
   xwl_surface.c
@@ -132,6 +137,7 @@ target_link_libraries(
   $<$<BOOL:${LIBBACKTRACE}>:${LIBBACKTRACE}>
   PkgConfig::CAIRO
   PkgConfig::LIBXDGBASEDIR
+  PkgConfig::RSVG
   PkgConfig::WAYLAND_SERVER
   PkgConfig::WLROOTS
   PkgConfig::XCB)

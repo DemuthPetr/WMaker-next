@@ -324,6 +324,12 @@ bool _wlmtk_surface_init(
             &surface_ptr->surface_unmap_listener,
             _wlmtk_surface_handle_surface_unmap);
         surface_ptr->wlr_surface_ptr->data = surface_ptr;
+        // The surface may have been committed before (eg. Xwayland surfaces,
+        // associated after their first commit). Start out at that size.
+        _wlmtk_surface_commit_size(
+            surface_ptr,
+            wlr_surface_ptr->current.width,
+            wlr_surface_ptr->current.height);
     }
 
     return true;

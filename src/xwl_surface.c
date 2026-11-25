@@ -32,6 +32,7 @@
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/version.h>
 #include <wlr/xwayland/xwayland.h>
+#include <xcb/xcb_icccm.h>
 #undef WLR_USE_UNSTABLE
 
 #include "input/cursor.h"
@@ -60,6 +61,10 @@ struct _wlmaker_xwl_surface_t {
     struct wl_listener        request_configure_listener;
     /** Listener for `request_minimize` signal of `wlr_xwayland_surface`. */
     struct wl_listener        request_minimize_listener;
+    /** A minimize request that came before the window was mapped. */
+    bool                      minimize_on_map;
+    /** Listener for `set_class` signal of `wlr_xwayland_surface`. */
+    struct wl_listener        set_class_listener;
 
     /** Listener for the `associate` signal of `wlr_xwayland_surface`. */
     struct wl_listener        associate_listener;
@@ -111,6 +116,9 @@ static void _xwl_surface_handle_request_configure(
     struct wl_listener *listener_ptr,
     void *data_ptr);
 static void _xwl_surface_handle_request_minimize(
+    struct wl_listener *listener_ptr,
+    void *data_ptr);
+static void _xwl_surface_handle_set_class(
     struct wl_listener *listener_ptr,
     void *data_ptr);
 
@@ -213,6 +221,10 @@ wlmaker_xwl_surface_t *wlmaker_xwl_surface_create(
         &wlr_xwayland_surface_ptr->events.request_minimize,
         &xwl_surface_ptr->request_minimize_listener,
         _xwl_surface_handle_request_minimize);
+    wlmtk_util_connect_listener_signal(
+        &wlr_xwayland_surface_ptr->events.set_class,
+        &xwl_surface_ptr->set_class_listener,
+        _xwl_surface_handle_set_class);
 
     wlmtk_util_connect_listener_signal(
         &wlr_xwayland_surface_ptr->events.associate,
@@ -259,6 +271,7 @@ void wlmaker_xwl_surface_destroy(wlmaker_xwl_surface_t *xwl_surface_ptr)
     wlmtk_util_disconnect_listener(&xwl_surface_ptr->set_title_listener);
     wlmtk_util_disconnect_listener(&xwl_surface_ptr->dissociate_listener);
     wlmtk_util_disconnect_listener(&xwl_surface_ptr->associate_listener);
+    wlmtk_util_disconnect_listener(&xwl_surface_ptr->set_class_listener);
     wlmtk_util_disconnect_listener(&xwl_surface_ptr->request_minimize_listener);
     wlmtk_util_disconnect_listener(&xwl_surface_ptr->request_configure_listener);
     wlmtk_util_disconnect_listener(&xwl_surface_ptr->destroy_listener);
@@ -292,6 +305,20 @@ void _xwl_surface_handle_destroy(
 }
 
 /* ------------------------------------------------------------------------- */
+/** Handler for `set_class`: The WM_CLASS class serves as application ID. */
+void _xwl_surface_handle_set_class(
+    struct wl_listener *listener_ptr,
+    __UNUSED__ void *data_ptr)
+{
+    wlmaker_xwl_surface_t *xwl_surface_ptr = BS_CONTAINER_OF(
+        listener_ptr, wlmaker_xwl_surface_t, set_class_listener);
+    if (NULL == xwl_surface_ptr->window_ptr) return;
+    wlmtk_window_set_app_id(
+        xwl_surface_ptr->window_ptr,
+        xwl_surface_ptr->wlr_xwayland_surface_ptr->class);
+}
+
+/* ------------------------------------------------------------------------- */
 /**
  * Handler for the `request_minimize` event of `struct wlr_xwayland_surface`:
  * Minimizes or restores the window.
@@ -307,8 +334,14 @@ void _xwl_surface_handle_request_minimize(
         listener_ptr, wlmaker_xwl_surface_t, request_minimize_listener);
     struct wlr_xwayland_minimize_event *event_ptr = data_ptr;
     wlmtk_window_t *window_ptr = xwl_surface_ptr->window_ptr;
-    if (NULL == window_ptr) return;
-
+    bs_log(BS_INFO, "XWL surface %p requests minimize %d (window %p, "
+           "workspace %p)", xwl_surface_ptr, event_ptr->minimize, window_ptr,
+           NULL != window_ptr ? wlmtk_window_get_workspace(window_ptr) : NULL);
+    if (NULL == window_ptr || NULL == wlmtk_window_get_workspace(window_ptr)) {
+        // Not mapped yet: Apply once mapped, see _xwl_surface_handle_surface_map.
+        xwl_surface_ptr->minimize_on_map = event_ptr->minimize;
+        return;
+    }
     if (event_ptr->minimize) {
         wlmtk_window_request_minimize(window_ptr);
     } else if (NULL != wlmtk_window_get_workspace(window_ptr)) {
@@ -475,6 +508,9 @@ void _xwl_surface_handle_associate(
         wlmtk_window_set_client(xwl_surface_ptr->window_ptr, &client);
         wlmtk_window_set_title(xwl_surface_ptr->window_ptr,
                                 xwl_surface_ptr->title_ptr);
+        wlmtk_window_set_app_id(
+            xwl_surface_ptr->window_ptr,
+            xwl_surface_ptr->wlr_xwayland_surface_ptr->class);
 
         wlmtk_util_connect_listener_signal(
             &wlmtk_window_events(xwl_surface_ptr->window_ptr)->request_close,
@@ -500,6 +536,19 @@ void _xwl_surface_handle_associate(
         wl_signal_emit(
             &xwl_surface_ptr->server_ptr->window_created_event,
             xwl_surface_ptr->window_ptr);
+    }
+
+    // wlroots maps the surface on the first commit with a buffer *after*
+    // association. Xwayland may have committed the window's contents before
+    // that -- an idle window then never commits again, and would stay
+    // invisible. Map it now.
+    struct wlr_surface *wlr_surface_ptr =
+        xwl_surface_ptr->wlr_xwayland_surface_ptr->surface;
+    if (!wlr_surface_ptr->mapped && wlr_surface_has_buffer(wlr_surface_ptr)) {
+        wlr_surface_map(wlr_surface_ptr);
+        // Applies the size of that earlier commit (window was NULL then).
+        _xwl_surface_handle_surface_commit(
+            &xwl_surface_ptr->surface_commit_listener, NULL);
     }
 
     bs_log(BS_INFO,
@@ -694,6 +743,17 @@ void _xwl_surface_handle_surface_map(
         wlmtk_root_get_current_workspace(
             xwl_surface_ptr->server_ptr->root_ptr);
     wlmtk_workspace_map_window(workspace_ptr, xwl_surface_ptr->window_ptr);
+
+    // Start minimized: Requested before mapping, or by the ICCCM hint.
+    struct wlr_xwayland_surface *s = xwl_surface_ptr->wlr_xwayland_surface_ptr;
+    if (xwl_surface_ptr->minimize_on_map ||
+        (NULL != s->hints &&
+         (s->hints->flags & XCB_ICCCM_WM_HINT_STATE) &&
+         XCB_ICCCM_WM_STATE_ICONIC == s->hints->initial_state)) {
+        xwl_surface_ptr->minimize_on_map = false;
+        wlmtk_window_request_minimize(xwl_surface_ptr->window_ptr);
+        wlr_xwayland_surface_set_minimized(s, true);
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -954,6 +1014,7 @@ void fake_init_wlr_xwayland_surface(
     wl_signal_init(&wlr_xwayland_surface_ptr->events.destroy);
     wl_signal_init(&wlr_xwayland_surface_ptr->events.request_configure);
     wl_signal_init(&wlr_xwayland_surface_ptr->events.request_minimize);
+    wl_signal_init(&wlr_xwayland_surface_ptr->events.set_class);
     wl_signal_init(&wlr_xwayland_surface_ptr->events.associate);
     wl_signal_init(&wlr_xwayland_surface_ptr->events.dissociate);
     wl_signal_init(&wlr_xwayland_surface_ptr->events.set_title);

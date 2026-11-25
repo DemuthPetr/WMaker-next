@@ -50,6 +50,7 @@ typedef struct _wlmaker_server_t wlmaker_server_t;
 #include "layer_shell.h"  // IWYU pragma: keep
 #include "lock_mgr.h"  // IWYU pragma: keep
 #include "root_menu.h"  // IWYU pragma: keep
+#include "window_list.h"  // IWYU pragma: keep
 #include "subprocess_monitor.h"  // IWYU pragma: keep
 #include "toolkit/toolkit.h"
 #include "xdg_decoration.h"  // IWYU pragma: keep
@@ -173,6 +174,8 @@ struct _wlmaker_server_t {
 
     /** Root menu, when active. NULL when not invoked. */
     wlmaker_root_menu_t       *root_menu_ptr;
+    /** Window list menu (middle-click on the desktop). */
+    wlmaker_window_list_t     *window_list_ptr;
     /** Parsed contents of the root menu definition, from plist. */
     bspl_array_t            *root_menu_array_ptr;
     /** Listener for `unclaimed_button_event` signal raised by `wlmtk_root`. */

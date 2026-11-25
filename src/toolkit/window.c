@@ -92,6 +92,8 @@ struct _wlmtk_window_t {
 
     /** The window's title. */
     char                      *title_ptr;
+    /** Application ID (XDG app_id, or X11 WM_CLASS class). May be NULL. */
+    char                      *app_id_ptr;
 
     /** Properties of the window. See @ref wlmtk_window_property_t. */
     uint32_t                  properties;
@@ -331,6 +333,10 @@ void wlmtk_window_destroy(wlmtk_window_t *window_ptr)
         free(window_ptr->title_ptr);
         window_ptr->title_ptr = NULL;
     }
+    if (NULL != window_ptr->app_id_ptr) {
+        free(window_ptr->app_id_ptr);
+        window_ptr->app_id_ptr = NULL;
+    }
 
     if (NULL != window_ptr->style_ref_ptr) {
         wlmtk_window_style_ref_release(window_ptr->style_ref_ptr);
@@ -477,6 +483,24 @@ const char *wlmtk_window_get_title(wlmtk_window_t *window_ptr)
 {
     BS_ASSERT(NULL != window_ptr->title_ptr);
     return window_ptr->title_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_window_set_app_id(
+    wlmtk_window_t *window_ptr,
+    const char *app_id_ptr)
+{
+    if (NULL != window_ptr->app_id_ptr) free(window_ptr->app_id_ptr);
+    window_ptr->app_id_ptr = NULL;
+    if (NULL != app_id_ptr && *app_id_ptr) {
+        window_ptr->app_id_ptr = logged_strdup(app_id_ptr);
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+const char *wlmtk_window_get_app_id(wlmtk_window_t *window_ptr)
+{
+    return window_ptr->app_id_ptr;
 }
 
 /* ------------------------------------------------------------------------- */

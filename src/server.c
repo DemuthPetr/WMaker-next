@@ -344,6 +344,10 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
         wlmaker_background_dlnode_destroy,
         NULL);
 
+    if (NULL != server_ptr->window_list_ptr) {
+        wlmaker_window_list_destroy(server_ptr->window_list_ptr);
+        server_ptr->window_list_ptr = NULL;
+    }
     if (NULL != server_ptr->root_menu_ptr) {
         wlmaker_root_menu_destroy(server_ptr->root_menu_ptr);
         server_ptr->root_menu_ptr = NULL;
@@ -471,7 +475,10 @@ struct wlr_output *wlmaker_server_get_output_at_cursor(
 /* == Local (static) methods =============================================== */
 
 /* ------------------------------------------------------------------------- */
-/** Handles unclaimed button events: Right 'down' opens root menu. */
+/**
+ * Handles unclaimed button events: Right 'down' opens root menu, middle
+ * 'down' opens the window list.
+ */
 void _wlmaker_server_unclaimed_button_event_handler(
     struct wl_listener *listener_ptr,
     void *data_ptr)
@@ -479,6 +486,13 @@ void _wlmaker_server_unclaimed_button_event_handler(
     wlmaker_server_t *server_ptr = BS_CONTAINER_OF(
         listener_ptr, wlmaker_server_t, unclaimed_button_event_listener);
     wlmtk_button_event_t *button_event_ptr = data_ptr;
+
+    if (BTN_MIDDLE == button_event_ptr->button &&
+        WLMTK_BUTTON_DOWN == button_event_ptr->type &&
+        NULL != server_ptr->window_list_ptr) {
+        wlmaker_window_list_open(server_ptr->window_list_ptr);
+        return;
+    }
 
     if (BTN_RIGHT == button_event_ptr->button &&
         WLMTK_BUTTON_DOWN == button_event_ptr->type &&

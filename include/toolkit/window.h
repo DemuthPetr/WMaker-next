@@ -269,6 +269,20 @@ bool wlmtk_window_set_title(
 const char *wlmtk_window_get_title(wlmtk_window_t *window_ptr);
 
 /**
+ * Sets the application ID: The XDG toplevel's app_id, or the X11 client's
+ * WM_CLASS class. Used to find the application's icon and to group windows.
+ *
+ * @param window_ptr
+ * @param app_id_ptr          May be NULL or empty, to clear it.
+ */
+void wlmtk_window_set_app_id(
+    wlmtk_window_t *window_ptr,
+    const char *app_id_ptr);
+
+/** @return The application ID, or NULL if not known. */
+const char *wlmtk_window_get_app_id(wlmtk_window_t *window_ptr);
+
+/**
  * Sets the window as activated, depending on the argument's value.
  *
  * An activated window will have keyboard focus and would have distinct

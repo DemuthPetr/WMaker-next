@@ -220,6 +220,12 @@ void wlmtk_container_remove_element(
 {
     BS_ASSERT(element_ptr->parent_container_ptr == container_ptr);
     wlmtk_element_pointer_blur(element_ptr);
+    // The blur doesn't reach us while our blur is inhibited (removal during
+    // pointer motion dispatch), or if the element wasn't flagged as having
+    // the pointer. Never keep focus on an element that's gone.
+    if (container_ptr->pointer_focus_element_ptr == element_ptr) {
+        container_ptr->pointer_focus_element_ptr = NULL;
+    }
 
     if (container_ptr->pointer_grab_element_ptr == element_ptr) {
         _wlmtk_container_element_pointer_grab_cancel(
@@ -891,6 +897,7 @@ static void test_pointer_axis(bs_test_t *test_ptr);
 static void test_pointer_focus_with_parent(bs_test_t *test_ptr);
 static void test_pointer_focus_children(bs_test_t *test_ptr);
 static void test_pointer_focus_order(bs_test_t *test_ptr);
+static void test_remove_focused_while_inhibited(bs_test_t *test_ptr);
 
 /** Test cases */
 static const bs_test_case_t _wlmtk_container_test_cases[] = {
@@ -907,6 +914,7 @@ static const bs_test_case_t _wlmtk_container_test_cases[] = {
     { 1, "pointer_focus_with_parent", test_pointer_focus_with_parent },
     { 1, "pointer_focus_children", test_pointer_focus_children },
     { 1, "test_pointer_focus_order", test_pointer_focus_order },
+    { 1, "remove_focused_while_inhibited", test_remove_focused_while_inhibited },
     BS_TEST_CASE_SENTINEL()
 };
 
@@ -1620,6 +1628,31 @@ void test_pointer_axis(bs_test_t *test_ptr)
 
 /* ------------------------------------------------------------------------- */
 /** Tests pointer focus. */
+/** Removing the pointer-focussed element while blur is inhibited. */
+static void test_remove_focused_while_inhibited(bs_test_t *test_ptr)
+{
+    wlmtk_container_t c;
+    BS_TEST_VERIFY_TRUE_OR_RETURN(test_ptr, wlmtk_container_init(&c));
+    wlmtk_element_set_visible(&c.super_element, true);
+    wlmtk_fake_element_t *fe_ptr = wlmtk_fake_element_create();
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, fe_ptr);
+    wlmtk_element_set_visible(&fe_ptr->element, true);
+    wlmtk_container_add_element(&c, &fe_ptr->element);
+
+    wlmtk_pointer_motion_event_t e = { .x = 1.0, .y = 1.0 };
+    wlmtk_element_pointer_motion(&c.super_element, &e);
+    BS_TEST_VERIFY_EQ(test_ptr, &fe_ptr->element, c.pointer_focus_element_ptr);
+
+    // As during pointer motion dispatch: The container won't accept blur.
+    c.super_element.inhibit_pointer_blur = true;
+    wlmtk_container_remove_element(&c, &fe_ptr->element);
+    c.super_element.inhibit_pointer_blur = false;
+    BS_TEST_VERIFY_EQ(test_ptr, NULL, c.pointer_focus_element_ptr);
+
+    wlmtk_element_destroy(&fe_ptr->element);
+    wlmtk_container_fini(&c);
+}
+
 static void test_pointer_focus_with_parent(bs_test_t *test_ptr)
 {
     wlmtk_container_t p, c;

@@ -408,6 +408,10 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     wlmtk_menu_set_open(
         wlmaker_root_menu_menu(server_ptr->root_menu_ptr),
         false);
+    server_ptr->window_list_ptr = wlmaker_window_list_create(server_ptr);
+    if (NULL == server_ptr->window_list_ptr) {
+        return EXIT_FAILURE;
+    }
 
     wlmaker_action_handle_t *action_handle_ptr = wlmaker_action_bind_keys(
         server_ptr,

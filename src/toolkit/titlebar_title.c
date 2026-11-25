@@ -204,6 +204,15 @@ bool _wlmtk_titlebar_title_element_pointer_button(
         return true;
     }
 
+    // Double-click shades or unshades, as in Window Maker.
+    if (BTN_LEFT == button_event_ptr->button &&
+        WLMTK_BUTTON_DOUBLE_CLICK == button_event_ptr->type) {
+        wlmtk_window_request_shaded(
+            titlebar_title_ptr->window_ptr,
+            !wlmtk_window_is_shaded(titlebar_title_ptr->window_ptr));
+        return true;
+    }
+
     if (BTN_RIGHT == button_event_ptr->button &&
         WLMTK_BUTTON_DOWN == button_event_ptr->type) {
         wlmtk_window_menu_set_enabled(
@@ -489,6 +498,14 @@ void test_shade(bs_test_t *test_ptr)
 
     axis_event.delta = 0.01;
     wlmtk_element_pointer_axis(element_ptr, &axis_event);
+    BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_window_is_shaded(w));
+
+    // Double-click toggles shading.
+    wlmtk_button_event_t dbl = {
+        .button = BTN_LEFT, .type = WLMTK_BUTTON_DOUBLE_CLICK };
+    wlmtk_element_pointer_button(element_ptr, &dbl);
+    BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_window_is_shaded(w));
+    wlmtk_element_pointer_button(element_ptr, &dbl);
     BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_window_is_shaded(w));
 
     // Axis from another source: Ignored.

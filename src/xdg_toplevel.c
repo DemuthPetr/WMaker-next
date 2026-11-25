@@ -365,6 +365,8 @@ struct wlmaker_xdg_toplevel *_wlmaker_xdg_toplevel_create_injected(
         WLMTK_WINDOW_PROPERTY_RESIZABLE |
         WLMTK_WINDOW_PROPERTY_ICONIFIABLE |
         WLMTK_WINDOW_PROPERTY_CLOSABLE);
+    wlmtk_window_set_app_id(wlmaker_xdg_toplevel_ptr->window_ptr,
+                            wlr_xdg_toplevel_ptr->app_id);
     wlmtk_util_client_t client = {};
     if (NULL != wlr_xdg_toplevel_ptr->resource) {
         wl_client_get_credentials(
@@ -686,7 +688,9 @@ void _wlmaker_xdg_toplevel_handle_set_app_id(
     struct wlmaker_xdg_toplevel *wlmaker_xdg_toplevel_ptr = BS_CONTAINER_OF(
         listener_ptr, struct wlmaker_xdg_toplevel, set_app_id_listener);
 
-    bs_log(BS_ERROR, "TODO: set_app_id %p", wlmaker_xdg_toplevel_ptr);
+    wlmtk_window_set_app_id(
+        wlmaker_xdg_toplevel_ptr->window_ptr,
+        wlmaker_xdg_toplevel_ptr->wlr_xdg_toplevel_ptr->app_id);
 }
 
 /* ------------------------------------------------------------------------- */

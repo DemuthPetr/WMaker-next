@@ -59,6 +59,8 @@ struct _wlmim_keyboard_t {
     struct wlr_seat           *wlr_seat_ptr;
     /** Root element, for forwarding events. */
     wlmtk_element_t           *root_element_ptr;
+    /** US keymap: Fallback for matching key bindings on other layouts. */
+    struct xkb_keymap         *us_xkb_keymap_ptr;
 };
 
 static bspl_dict_t *_wlmim_keyboard_populate_rules(
@@ -151,6 +153,12 @@ wlmim_keyboard_t *wlmim_keyboard_create(
     bspl_dict_unref(rmlvo_dict_ptr);
     wlr_keyboard_set_keymap(keyboard_ptr->wlr_keyboard_ptr, xkb_keymap_ptr);
     xkb_keymap_unref(xkb_keymap_ptr);
+    // Key bindings like "Logo+1" are written for the US layout. Keep that
+    // keymap, to look up the US keysym when the configured one has no match.
+    struct xkb_rule_names us_rule = {
+        .rules = "evdev", .model = "pc105", .layout = "us" };
+    keyboard_ptr->us_xkb_keymap_ptr = xkb_keymap_new_from_names(
+        xkb_context_ptr, &us_rule, XKB_KEYMAP_COMPILE_NO_FLAGS);
     xkb_context_unref(xkb_context_ptr);
 
     // Repeat rate and delay.
@@ -207,6 +215,10 @@ void wlmim_keyboard_destroy(wlmim_keyboard_t *keyboard_ptr)
     wlmtk_util_disconnect_listener(&keyboard_ptr->key_listener);
     wlmtk_util_disconnect_listener(&keyboard_ptr->modifiers_listener);
 
+    if (NULL != keyboard_ptr->us_xkb_keymap_ptr) {
+        xkb_keymap_unref(keyboard_ptr->us_xkb_keymap_ptr);
+        keyboard_ptr->us_xkb_keymap_ptr = NULL;
+    }
     if (NULL != keyboard_ptr->config_dict_ptr) {
         bspl_dict_unref(keyboard_ptr->config_dict_ptr);
         keyboard_ptr->config_dict_ptr = NULL;
@@ -425,6 +437,27 @@ void handle_key(struct wl_listener *listener_ptr, void *data_ptr)
                 key_syms[i],
                 direction,
                 modifiers);
+        }
+    }
+
+    // Fallback for other layouts: Match bindings by the key's US keysym (eg.
+    // "Logo+1" on the Czech number row, which yields "plus").
+    if (!processed &&
+        WL_KEYBOARD_KEY_STATE_PRESSED == wlr_keyboard_key_event_ptr->state &&
+        NULL != keyboard_ptr->us_xkb_keymap_ptr) {
+        const xkb_keysym_t *us_syms;
+        int us_syms_count = xkb_keymap_key_get_syms_by_level(
+            keyboard_ptr->us_xkb_keymap_ptr, keycode, 0, 0, &us_syms);
+        for (int i = 0; i < us_syms_count; ++i) {
+            bool tried = false;
+            for (int j = 0; j < key_syms_count; ++j) {
+                tried |= us_syms[i] == key_syms[j];
+            }
+            if (!tried) {
+                processed |= wlmim_process_key(keyboard_ptr->input_manager_ptr,
+                                               us_syms[i],
+                                               modifiers);
+            }
         }
     }
 

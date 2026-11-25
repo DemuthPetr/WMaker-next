@@ -88,6 +88,13 @@ static bool _wlmaker_keybindings_bind_item(
 static bool _wlmaker_action_bound_callback(
     const struct wlmim_keybinding_combo *binding_ptr);
 
+static bool _wlmaker_action_same_application(
+    wlmtk_window_t *window1_ptr,
+    wlmtk_window_t *window2_ptr);
+static void _wlmaker_action_hide(
+    wlmaker_server_t *server_ptr,
+    wlmtk_window_t *app_window_ptr,
+    bool others);
 static bool _wlmaker_action_theme_load_from_file(
     wlmaker_server_t *server_ptr,
     const char *fname_ptr);
@@ -111,6 +118,26 @@ const bspl_enum_desc_t wlmaker_action_desc[] = {
     BSPL_ENUM("WorkspacePrevious", WLMAKER_ACTION_WORKSPACE_TO_PREVIOUS),
     BSPL_ENUM("WorkspaceNext", WLMAKER_ACTION_WORKSPACE_TO_NEXT),
     BSPL_ENUM("WorkspaceAdd", WLMAKER_ACTION_WORKSPACE_ADD),
+    BSPL_ENUM("Workspace1", WLMAKER_ACTION_WORKSPACE_1),
+    BSPL_ENUM("Workspace2", WLMAKER_ACTION_WORKSPACE_2),
+    BSPL_ENUM("Workspace3", WLMAKER_ACTION_WORKSPACE_3),
+    BSPL_ENUM("Workspace4", WLMAKER_ACTION_WORKSPACE_4),
+    BSPL_ENUM("Workspace5", WLMAKER_ACTION_WORKSPACE_5),
+    BSPL_ENUM("Workspace6", WLMAKER_ACTION_WORKSPACE_6),
+    BSPL_ENUM("Workspace7", WLMAKER_ACTION_WORKSPACE_7),
+    BSPL_ENUM("Workspace8", WLMAKER_ACTION_WORKSPACE_8),
+    BSPL_ENUM("Workspace9", WLMAKER_ACTION_WORKSPACE_9),
+    BSPL_ENUM("Workspace10", WLMAKER_ACTION_WORKSPACE_10),
+    BSPL_ENUM("WindowToWorkspace1", WLMAKER_ACTION_WINDOW_TO_WORKSPACE_1),
+    BSPL_ENUM("WindowToWorkspace2", WLMAKER_ACTION_WINDOW_TO_WORKSPACE_2),
+    BSPL_ENUM("WindowToWorkspace3", WLMAKER_ACTION_WINDOW_TO_WORKSPACE_3),
+    BSPL_ENUM("WindowToWorkspace4", WLMAKER_ACTION_WINDOW_TO_WORKSPACE_4),
+    BSPL_ENUM("WindowToWorkspace5", WLMAKER_ACTION_WINDOW_TO_WORKSPACE_5),
+    BSPL_ENUM("WindowToWorkspace6", WLMAKER_ACTION_WINDOW_TO_WORKSPACE_6),
+    BSPL_ENUM("WindowToWorkspace7", WLMAKER_ACTION_WINDOW_TO_WORKSPACE_7),
+    BSPL_ENUM("WindowToWorkspace8", WLMAKER_ACTION_WINDOW_TO_WORKSPACE_8),
+    BSPL_ENUM("WindowToWorkspace9", WLMAKER_ACTION_WINDOW_TO_WORKSPACE_9),
+    BSPL_ENUM("WindowToWorkspace10", WLMAKER_ACTION_WINDOW_TO_WORKSPACE_10),
     BSPL_ENUM("WorkspaceDestroyLast", WLMAKER_ACTION_WORKSPACE_DESTROY_LAST),
 
     BSPL_ENUM("TaskPrevious", WLMAKER_ACTION_TASK_TO_PREVIOUS),
@@ -125,6 +152,8 @@ const bspl_enum_desc_t wlmaker_action_desc[] = {
     BSPL_ENUM("WindowUnmaximize", WLMAKER_ACTION_WINDOW_UNMAXIMIZE),
     BSPL_ENUM("WindowFullscreen", WLMAKER_ACTION_WINDOW_FULLSCREEN),
     BSPL_ENUM("WindowMinimize", WLMAKER_ACTION_WINDOW_MINIMIZE),
+    BSPL_ENUM("HideApplication", WLMAKER_ACTION_HIDE_APPLICATION),
+    BSPL_ENUM("HideOthers", WLMAKER_ACTION_HIDE_OTHERS),
     BSPL_ENUM("WindowShade", WLMAKER_ACTION_WINDOW_SHADE),
     BSPL_ENUM("WindowUnshade", WLMAKER_ACTION_WINDOW_UNSHADE),
     BSPL_ENUM("WindowClose", WLMAKER_ACTION_WINDOW_CLOSE),
@@ -132,6 +161,7 @@ const bspl_enum_desc_t wlmaker_action_desc[] = {
     BSPL_ENUM("WindowToPreviousWorkspace", WLMAKER_ACTION_WINDOW_TO_PREVIOUS_WORKSPACE),
 
     BSPL_ENUM("RootMenu", WLMAKER_ACTION_ROOT_MENU),
+    BSPL_ENUM("WindowList", WLMAKER_ACTION_WINDOW_LIST),
 
     BSPL_ENUM("ThemeLoadFromFile", WLMAKER_ACTION_THEME_LOAD_FROM_FILE),
 
@@ -366,6 +396,17 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
         }
         break;
 
+    case WLMAKER_ACTION_HIDE_APPLICATION:
+    case WLMAKER_ACTION_HIDE_OTHERS:
+        workspace_ptr = wlmtk_root_get_current_workspace(
+            server_ptr->root_ptr);
+        window_ptr = wlmtk_workspace_get_activated_window(workspace_ptr);
+        if (NULL != window_ptr) {
+            _wlmaker_action_hide(server_ptr, window_ptr,
+                                 WLMAKER_ACTION_HIDE_OTHERS == action);
+        }
+        break;
+
     case WLMAKER_ACTION_WINDOW_SHADE:
         workspace_ptr = wlmtk_root_get_current_workspace(
             server_ptr->root_ptr);
@@ -381,6 +422,47 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
         window_ptr = wlmtk_workspace_get_activated_window(workspace_ptr);
         if (NULL != window_ptr) {
             wlmtk_window_request_shaded(window_ptr, false);
+        }
+        break;
+
+    case WLMAKER_ACTION_WORKSPACE_1:
+    case WLMAKER_ACTION_WORKSPACE_2:
+    case WLMAKER_ACTION_WORKSPACE_3:
+    case WLMAKER_ACTION_WORKSPACE_4:
+    case WLMAKER_ACTION_WORKSPACE_5:
+    case WLMAKER_ACTION_WORKSPACE_6:
+    case WLMAKER_ACTION_WORKSPACE_7:
+    case WLMAKER_ACTION_WORKSPACE_8:
+    case WLMAKER_ACTION_WORKSPACE_9:
+    case WLMAKER_ACTION_WORKSPACE_10:
+        wlmtk_root_switch_to_workspace(
+            server_ptr->root_ptr,
+            wlmtk_root_get_workspace(
+                server_ptr->root_ptr,
+                action - WLMAKER_ACTION_WORKSPACE_1));
+        break;
+
+    case WLMAKER_ACTION_WINDOW_TO_WORKSPACE_1:
+    case WLMAKER_ACTION_WINDOW_TO_WORKSPACE_2:
+    case WLMAKER_ACTION_WINDOW_TO_WORKSPACE_3:
+    case WLMAKER_ACTION_WINDOW_TO_WORKSPACE_4:
+    case WLMAKER_ACTION_WINDOW_TO_WORKSPACE_5:
+    case WLMAKER_ACTION_WINDOW_TO_WORKSPACE_6:
+    case WLMAKER_ACTION_WINDOW_TO_WORKSPACE_7:
+    case WLMAKER_ACTION_WINDOW_TO_WORKSPACE_8:
+    case WLMAKER_ACTION_WINDOW_TO_WORKSPACE_9:
+    case WLMAKER_ACTION_WINDOW_TO_WORKSPACE_10:
+        workspace_ptr = wlmtk_root_get_current_workspace(
+            server_ptr->root_ptr);
+        window_ptr = wlmtk_workspace_get_activated_window(workspace_ptr);
+        next_workspace_ptr = wlmtk_root_get_workspace(
+            server_ptr->root_ptr,
+            action - WLMAKER_ACTION_WINDOW_TO_WORKSPACE_1);
+        if (NULL != window_ptr &&
+            NULL != next_workspace_ptr &&
+            workspace_ptr != next_workspace_ptr) {
+            wlmtk_workspace_unmap_window(workspace_ptr, window_ptr);
+            wlmtk_workspace_map_window(next_workspace_ptr, window_ptr);
         }
         break;
 
@@ -416,6 +498,12 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
         window_ptr = wlmtk_workspace_get_activated_window(workspace_ptr);
         if (NULL != window_ptr) {
             wlmtk_window_request_close(window_ptr);
+        }
+        break;
+
+    case WLMAKER_ACTION_WINDOW_LIST:
+        if (NULL != server_ptr->window_list_ptr) {
+            wlmaker_window_list_open(server_ptr->window_list_ptr);
         }
         break;
 
@@ -485,6 +573,68 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
 }
 
 /* == Local (static) methods =============================================== */
+
+/* ------------------------------------------------------------------------- */
+/**
+ * @return whether both windows belong to the same application: Same app ID
+ *     if both have one, else the same client process.
+ */
+bool _wlmaker_action_same_application(
+    wlmtk_window_t *window1_ptr,
+    wlmtk_window_t *window2_ptr)
+{
+    if (window1_ptr == window2_ptr) return true;
+    const char *app_id1_ptr = wlmtk_window_get_app_id(window1_ptr);
+    const char *app_id2_ptr = wlmtk_window_get_app_id(window2_ptr);
+    if (NULL != app_id1_ptr && NULL != app_id2_ptr) {
+        return 0 == strcmp(app_id1_ptr, app_id2_ptr);
+    }
+    pid_t pid1 = wlmtk_window_get_client_ptr(window1_ptr)->pid;
+    return 0 != pid1 && pid1 == wlmtk_window_get_client_ptr(window2_ptr)->pid;
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Window Maker's "Hide" and "Hide Others": Minimizes all windows of the
+ * application of `app_window_ptr`, on all workspaces. Or, with `others`,
+ * all windows of other applications on the current workspace.
+ *
+ * @param server_ptr
+ * @param app_window_ptr
+ * @param others
+ */
+void _wlmaker_action_hide(
+    wlmaker_server_t *server_ptr,
+    wlmtk_window_t *app_window_ptr,
+    bool others)
+{
+    wlmtk_workspace_t *current_ptr = wlmtk_root_get_current_workspace(
+        server_ptr->root_ptr);
+    wlmtk_window_t *root_menu_window_ptr = NULL;
+    if (NULL != server_ptr->root_menu_ptr) {
+        root_menu_window_ptr = wlmaker_root_menu_window(
+            server_ptr->root_menu_ptr);
+    }
+
+    for (size_t i = 0; ; ++i) {
+        wlmtk_workspace_t *workspace_ptr = wlmtk_root_get_workspace(
+            server_ptr->root_ptr, i);
+        if (NULL == workspace_ptr) break;
+        if (others && workspace_ptr != current_ptr) continue;
+
+        // Minimizing keeps windows mapped, so the list stays intact.
+        for (bs_dllist_node_t *dlnode_ptr =
+                 wlmtk_workspace_get_windows_dllist(workspace_ptr)->head_ptr;
+             NULL != dlnode_ptr;
+             dlnode_ptr = dlnode_ptr->next_ptr) {
+            wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(dlnode_ptr);
+            if (window_ptr == root_menu_window_ptr) continue;
+            if (others == _wlmaker_action_same_application(
+                    window_ptr, app_window_ptr)) continue;
+            wlmtk_window_request_minimize(window_ptr);
+        }
+    }
+}
 
 /* ------------------------------------------------------------------------- */
 /**
