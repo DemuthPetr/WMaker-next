@@ -40,6 +40,7 @@
 #include <wlr/interfaces/wlr_buffer.h>
 #undef WLR_USE_UNSTABLE
 
+#include "app_icon.h"
 #include "config.h"
 #include "server.h"
 #include "toolkit/toolkit.h"
@@ -86,15 +87,17 @@ static void _wlmaker_task_list_draw_into_cairo(
     cairo_t *cairo_ptr,
     const struct wlmaker_task_list_style *style_ptr,
     wlmtk_workspace_t *workspace_ptr);
-static void _wlmaker_task_list_draw_window_into_cairo(
+static void _wlmaker_task_list_draw_tile(
     cairo_t *cairo_ptr,
-    const wlmtk_style_font_t *font_style_ptr,
-    uint32_t color,
     wlmtk_window_t *window_ptr,
     bool active,
-    int pos_y);
-static const char *_wlmaker_task_list_window_name(
-    wlmtk_window_t *window_ptr);
+    int x,
+    int y);
+static int _wlmaker_task_list_windows(
+    wlmtk_workspace_t *workspace_ptr,
+    wlmtk_window_t **windows_ptr,
+    int max_windows,
+    int *active_index_ptr);
 
 static uint32_t _wlmaker_task_list_request_size(
     wlmtk_panel_t *panel_ptr,
@@ -132,12 +135,23 @@ const bspl_desc_t wlmaker_task_list_style_desc[] = {
     BSPL_DESC_SENTINEL()
 };
 
-/** Task list positioning: Fixed dimensions, at center of layer. */
-static const wlmtk_panel_positioning_t _wlmaker_task_list_positioning = {
+/** Task list positioning: At center of layer. Sized to the windows shown. */
+static wlmtk_panel_positioning_t _wlmaker_task_list_positioning = {
     .desired_width = 400,
     .desired_height = 200,
     .anchor = WLR_EDGE_BOTTOM | WLR_EDGE_TOP | WLR_EDGE_LEFT | WLR_EDGE_RIGHT
 };
+
+/** Size of a window's tile in the switcher (Window Maker's switch panel). */
+static const int _wlmaker_task_list_tile = 72;
+/** Size of the app icon within the tile. */
+static const int _wlmaker_task_list_icon = 52;
+/** Margin around the tiles, and height of the title line. */
+static const int _wlmaker_task_list_margin = 12;
+/** Height of the title line below the tiles. */
+static const int _wlmaker_task_list_title_height = 28;
+/** Maximum number of tiles shown; the active one stays visible. */
+static const int _wlmaker_task_list_max_tiles = 9;
 
 /** Virtual method table for the task list. */
 static const wlmtk_panel_vmt_t _wlmaker_task_list_vmt = {
@@ -263,6 +277,20 @@ struct wlr_buffer *create_wlr_buffer(
     wlmtk_workspace_t *workspace_ptr,
     const struct wlmaker_task_list_style *style_ptr)
 {
+    int tiles = 1;
+    if (NULL != workspace_ptr) {
+        wlmtk_window_t *windows[_wlmaker_task_list_max_tiles];
+        int active;
+        tiles = BS_MAX(1, _wlmaker_task_list_windows(
+                           workspace_ptr, windows,
+                           _wlmaker_task_list_max_tiles, &active));
+    }
+    _wlmaker_task_list_positioning.desired_width =
+        tiles * _wlmaker_task_list_tile + 2 * _wlmaker_task_list_margin;
+    _wlmaker_task_list_positioning.desired_height =
+        _wlmaker_task_list_tile + 2 * _wlmaker_task_list_margin +
+        _wlmaker_task_list_title_height;
+
     struct wlr_buffer *wlr_buffer_ptr = bs_gfxbuf_create_wlr_buffer(
         _wlmaker_task_list_positioning.desired_width,
         _wlmaker_task_list_positioning.desired_height);
@@ -281,7 +309,57 @@ struct wlr_buffer *create_wlr_buffer(
 
 /* ------------------------------------------------------------------------- */
 /**
- * Draws all tasks of `workspace_ptr` into `cairo_ptr`.
+ * Collects up to `max_windows` non-minimized windows of the workspace, in
+ * switching order, keeping the active window within the selection.
+ *
+ * @return Number of windows stored in `windows_ptr`.
+ */
+int _wlmaker_task_list_windows(
+    wlmtk_workspace_t *workspace_ptr,
+    wlmtk_window_t **windows_ptr,
+    int max_windows,
+    int *active_index_ptr)
+{
+    wlmtk_window_t *active_ptr =
+        wlmtk_workspace_get_activated_window(workspace_ptr);
+    *active_index_ptr = -1;
+
+    // All candidates first, to find where the active window is.
+    int total = 0, active_pos = 0;
+    for (bs_dllist_node_t *dlnode_ptr =
+             wlmtk_workspace_get_windows_dllist(workspace_ptr)->head_ptr;
+         NULL != dlnode_ptr;
+         dlnode_ptr = dlnode_ptr->next_ptr) {
+        wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(dlnode_ptr);
+        if (wlmtk_window_is_minimized(window_ptr)) continue;
+        if (window_ptr == active_ptr) active_pos = total;
+        ++total;
+    }
+    int first = 0;
+    if (total > max_windows) {
+        first = BS_MIN(BS_MAX(0, active_pos - max_windows / 2),
+                       total - max_windows);
+    }
+
+    int n = 0, i = 0;
+    for (bs_dllist_node_t *dlnode_ptr =
+             wlmtk_workspace_get_windows_dllist(workspace_ptr)->head_ptr;
+         NULL != dlnode_ptr && n < max_windows;
+         dlnode_ptr = dlnode_ptr->next_ptr) {
+        wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(dlnode_ptr);
+        if (wlmtk_window_is_minimized(window_ptr)) continue;
+        if (i++ < first) continue;
+        if (window_ptr == active_ptr) *active_index_ptr = n;
+        windows_ptr[n++] = window_ptr;
+    }
+    return n;
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Draws the switcher: A row of window tiles with their application icons,
+ * the active one highlighted, and its title below. As Window Maker's
+ * switch panel.
  *
  * @param cairo_ptr
  * @param style_ptr
@@ -293,132 +371,93 @@ void _wlmaker_task_list_draw_into_cairo(
     wlmtk_workspace_t *workspace_ptr)
 {
     wlmaker_primitives_cairo_fill(cairo_ptr, &style_ptr->fill);
-
-    // Not tied to a workspace? We're done, all set.
     if (NULL == workspace_ptr) return;
 
-    const bs_dllist_t *windows_ptr = wlmtk_workspace_get_windows_dllist(
-        workspace_ptr);
-    // No windows at all? Done here.
-    if (bs_dllist_empty(windows_ptr)) return;
-
-    // Find node of the active window, for centering the task list.
-    bs_dllist_node_t *centered_dlnode_ptr = windows_ptr->head_ptr;
-    bs_dllist_node_t *active_dlnode_ptr = windows_ptr->head_ptr;
-    while (NULL != active_dlnode_ptr &&
-           wlmtk_workspace_get_activated_window(workspace_ptr) !=
-           wlmtk_window_from_dlnode(active_dlnode_ptr)) {
-        active_dlnode_ptr = active_dlnode_ptr->next_ptr;
+    wlmtk_window_t *windows[_wlmaker_task_list_max_tiles];
+    int active = -1;
+    int n = _wlmaker_task_list_windows(
+        workspace_ptr, windows, _wlmaker_task_list_max_tiles, &active);
+    for (int i = 0; i < n; ++i) {
+        _wlmaker_task_list_draw_tile(
+            cairo_ptr, windows[i], i == active,
+            _wlmaker_task_list_margin + i * _wlmaker_task_list_tile,
+            _wlmaker_task_list_margin);
     }
-    if (NULL != active_dlnode_ptr) centered_dlnode_ptr = active_dlnode_ptr;
+    if (0 > active) return;
 
-    int pos_y = _wlmaker_task_list_positioning.desired_height / 2 + 10;
-    _wlmaker_task_list_draw_window_into_cairo(
+    // Title of the active window, centered and shortened to fit.
+    char title[256];
+    const char *title_ptr = wlmtk_window_get_title(windows[active]);
+    snprintf(title, sizeof(title), "%s", NULL != title_ptr ? title_ptr : "");
+    cairo_set_source_argb8888(cairo_ptr, style_ptr->text_color);
+    cairo_select_font_face(cairo_ptr, style_ptr->font.face,
+                           CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(cairo_ptr, style_ptr->font.size);
+    int width = _wlmaker_task_list_positioning.desired_width -
+        2 * _wlmaker_task_list_margin;
+    cairo_text_extents_t extents;
+    cairo_text_extents(cairo_ptr, title, &extents);
+    for (size_t len = strlen(title); extents.x_advance > width && len > 4; ) {
+        size_t cut = len - 1;
+        while (cut > 0 && (title[cut] & 0xc0) == 0x80) --cut;
+        len = cut + 2;
+        strcpy(&title[cut], "..");
+        cairo_text_extents(cairo_ptr, title, &extents);
+    }
+    cairo_move_to(
         cairo_ptr,
-        &style_ptr->font,
-        style_ptr->text_color,
-        wlmtk_window_from_dlnode(centered_dlnode_ptr),
-        centered_dlnode_ptr == active_dlnode_ptr,
-        pos_y);
-
-    bs_dllist_node_t *dlnode_ptr = centered_dlnode_ptr->prev_ptr;
-    for (int further_windows = 1;
-         NULL != dlnode_ptr && further_windows <= 3;
-         dlnode_ptr = dlnode_ptr->prev_ptr, ++further_windows) {
-        _wlmaker_task_list_draw_window_into_cairo(
-            cairo_ptr,
-            &style_ptr->font,
-            style_ptr->text_color,
-            wlmtk_window_from_dlnode(dlnode_ptr),
-            false,
-            pos_y - further_windows * 26);
-    }
-
-    dlnode_ptr = centered_dlnode_ptr->next_ptr;
-    for (int further_windows = 1;
-         NULL != dlnode_ptr && further_windows <= 3;
-         dlnode_ptr = dlnode_ptr->next_ptr, ++further_windows) {
-        _wlmaker_task_list_draw_window_into_cairo(
-            cairo_ptr,
-            &style_ptr->font,
-            style_ptr->text_color,
-            wlmtk_window_from_dlnode(dlnode_ptr),
-            false,
-            pos_y + further_windows * 26);
-    }
+        (_wlmaker_task_list_positioning.desired_width - extents.x_advance) / 2,
+        _wlmaker_task_list_margin + _wlmaker_task_list_tile +
+        _wlmaker_task_list_title_height / 2 + extents.height / 2);
+    cairo_show_text(cairo_ptr, title);
 }
 
 /* ------------------------------------------------------------------------- */
 /**
- * Draws one window (task) into `cairo_ptr`.
- *
- * @param cairo_ptr
- * @param font_style_ptr
- * @param color
- * @param window_ptr
- * @param active              Whether this window is currently active.
- * @param pos_y               Y position within the `cairo_ptr`.
+ * Draws one window's tile: Bevelled square with the application's icon (or a
+ * stylized window), raised for the active window.
  */
-void _wlmaker_task_list_draw_window_into_cairo(
+void _wlmaker_task_list_draw_tile(
     cairo_t *cairo_ptr,
-    const wlmtk_style_font_t *font_style_ptr,
-    uint32_t color,
     wlmtk_window_t *window_ptr,
     bool active,
-    int pos_y)
+    int x,
+    int y)
 {
-    cairo_set_source_argb8888(cairo_ptr, color);
-    cairo_set_font_size(cairo_ptr, font_style_ptr->size);
-    cairo_select_font_face(
-        cairo_ptr,
-        font_style_ptr->face,
-        CAIRO_FONT_SLANT_NORMAL,
-        active ? CAIRO_FONT_WEIGHT_BOLD : CAIRO_FONT_WEIGHT_NORMAL);
-    cairo_move_to(cairo_ptr, 10, pos_y);
-    cairo_show_text(cairo_ptr, _wlmaker_task_list_window_name(window_ptr));
- }
+    const int t = _wlmaker_task_list_tile;
+    const int pad = 4;
 
-/* ------------------------------------------------------------------------- */
-/**
- * Constructs a comprehensive name for the window.
- *
- * @param window_ptr
- *
- * @return Pointer to the constructed name. This is a static buffer that does
- *     not require to be free'd, but will be re-used upon next call to
- *     window_name.
- */
-const char *_wlmaker_task_list_window_name(wlmtk_window_t *window_ptr)
-{
-    static char               name[256];
-
-    size_t pos = 0;
-
-    const char *title_ptr = wlmtk_window_get_title(window_ptr);
-    if (NULL != title_ptr) {
-        pos = bs_strappendf(name, sizeof(name), pos, "%s", title_ptr);
+    if (active) {
+        // Raised, lighter tile with a bevel, as a selected dock tile.
+        cairo_set_source_argb8888(cairo_ptr, 0xffd8d8d8);
+        cairo_rectangle(cairo_ptr, x + pad, y + pad, t - 2 * pad, t - 2 * pad);
+        cairo_fill(cairo_ptr);
+        wlmaker_primitives_draw_bezel_at(
+            cairo_ptr, x + pad, y + pad, t - 2 * pad, t - 2 * pad, 2.0, true);
     }
 
-    const wlmtk_util_client_t *client_ptr = wlmtk_window_get_client_ptr(
-        window_ptr);
-    if (NULL != client_ptr && 0 != client_ptr->pid) {
-        if (0 < pos) pos = bs_strappendf(name, sizeof(name), pos, " ");
-        pos = bs_strappendf(name, sizeof(name), pos, "[%"PRIdMAX,
-                            (intmax_t)client_ptr->pid);
-        char fname[PATH_MAX], cmdline[PATH_MAX];
-        snprintf(fname, sizeof(fname), "/proc/%"PRIdMAX"/cmdline",
-                 (intmax_t)client_ptr->pid);
-        ssize_t read_bytes = bs_file_read_buffer(
-            fname, cmdline, sizeof(cmdline));
-        if (0 < read_bytes) {
-            pos = bs_strappendf(name, sizeof(name), pos, ": %s", cmdline);
-        }
-        pos = bs_strappendf(name, sizeof(name), pos, "]");
+    int icon = _wlmaker_task_list_icon;
+    char *path_ptr = wlmaker_app_icon_find(wlmtk_window_get_app_id(window_ptr));
+    cairo_surface_t *icon_ptr = NULL;
+    if (NULL != path_ptr) {
+        icon_ptr = wlmaker_app_icon_load(path_ptr, icon);
+        free(path_ptr);
+    }
+    int ix = x + (t - icon) / 2, iy = y + (t - icon) / 2;
+    if (NULL != icon_ptr) {
+        cairo_set_source_surface(cairo_ptr, icon_ptr, ix, iy);
+        cairo_paint_with_alpha(cairo_ptr, active ? 1.0 : 0.75);
+        cairo_surface_destroy(icon_ptr);
+        return;
     }
 
-    if (0 < pos) pos = bs_strappendf(name, sizeof(name), pos, " ");
-    pos = bs_strappendf(name, sizeof(name), pos, "(%p)", window_ptr);
-    return &name[0];
+    // No icon known: A stylized window.
+    cairo_set_source_argb8888(cairo_ptr, 0xff000000);
+    cairo_rectangle(cairo_ptr, ix + 3, iy + 7, icon - 6, icon - 14);
+    cairo_fill(cairo_ptr);
+    cairo_set_source_argb8888(cairo_ptr, 0xffdadada);
+    cairo_rectangle(cairo_ptr, ix + 4, iy + 15, icon - 8, icon - 23);
+    cairo_fill(cairo_ptr);
 }
 
 /* ------------------------------------------------------------------------- */

@@ -308,6 +308,75 @@ bool create_workspaces(
 
 /* == Main program ========================================================= */
 /** The main program. */
+/* ------------------------------------------------------------------------- */
+/** State of scripted test actions, see @ref _wlmaker_test_actions_start. */
+typedef struct {
+    /** The server. */
+    wlmaker_server_t          *server_ptr;
+    /** Remaining script: "<delay ms>:<Action>,..." */
+    char                      *script_ptr;
+    /** Timer. */
+    struct wl_event_source    *timer_ptr;
+    /** Action due when the timer fires. */
+    int                       action;
+} _wlmaker_test_actions_t;
+
+static int _wlmaker_test_actions_timer(void *data_ptr);
+
+/* ------------------------------------------------------------------------- */
+/** Schedules the next scripted action, if any. */
+static void _wlmaker_test_actions_next(_wlmaker_test_actions_t *ta_ptr)
+{
+    char *item_ptr = ta_ptr->script_ptr;
+    if (NULL == item_ptr || 0 == *item_ptr) return;
+    char *rest_ptr = strchr(item_ptr, ',');
+    if (NULL != rest_ptr) *rest_ptr++ = '\0';
+    ta_ptr->script_ptr = rest_ptr;
+
+    char *name_ptr = strchr(item_ptr, ':');
+    if (NULL == name_ptr) return;
+    *name_ptr++ = '\0';
+    for (const bspl_enum_desc_t *d = wlmaker_action_desc; NULL != d->name_ptr;
+         ++d) {
+        if (0 != strcmp(d->name_ptr, name_ptr)) continue;
+        ta_ptr->action = d->value;
+        wl_event_source_timer_update(ta_ptr->timer_ptr, atoi(item_ptr));
+        return;
+    }
+    bs_log(BS_ERROR, "WLMAKER_TEST_ACTIONS: Unknown action '%s'", name_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+/** Timer callback: Executes the due action, schedules the next. */
+int _wlmaker_test_actions_timer(void *data_ptr)
+{
+    _wlmaker_test_actions_t *ta_ptr = data_ptr;
+    bs_log(BS_INFO, "WLMAKER_TEST_ACTIONS: Executing action %d", ta_ptr->action);
+    wlmaker_action_execute(ta_ptr->server_ptr, ta_ptr->action, NULL);
+    _wlmaker_test_actions_next(ta_ptr);
+    return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * For automated tests without input devices: Runs the actions listed in
+ * `WLMAKER_TEST_ACTIONS` ("<delay ms>:<Action>,...", eg. "500:TaskNext"),
+ * each after its delay. Inactive when not set.
+ */
+static void _wlmaker_test_actions_start(wlmaker_server_t *server_ptr)
+{
+    const char *env_ptr = getenv("WLMAKER_TEST_ACTIONS");
+    if (NULL == env_ptr || 0 == *env_ptr) return;
+    // Lives until exit.
+    static _wlmaker_test_actions_t ta;
+    ta.server_ptr = server_ptr;
+    ta.script_ptr = logged_strdup(env_ptr);
+    ta.timer_ptr = wl_event_loop_add_timer(
+        wl_display_get_event_loop(server_ptr->wl_display_ptr),
+        _wlmaker_test_actions_timer, &ta);
+    _wlmaker_test_actions_next(&ta);
+}
+
 int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
 {
     wlmaker_dock_t            *dock_ptr = NULL;
@@ -461,6 +530,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
             bs_log(BS_ERROR,
                    "Failed to create dock, clip, icon area or task list.");
         } else {
+            _wlmaker_test_actions_start(server_ptr);
             wl_display_run(server_ptr->wl_display_ptr);
         }
 

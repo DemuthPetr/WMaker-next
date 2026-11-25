@@ -861,6 +861,18 @@ void wlmtk_workspace_activate_previous_window(
     if (NULL == dlnode_ptr) {
         dlnode_ptr = workspace_ptr->windows.tail_ptr;
     }
+    // Skip minimized windows: Cycling must not restore them on the way.
+    for (size_t n = bs_dllist_size(&workspace_ptr->windows);
+         NULL != dlnode_ptr && 0 < n &&
+             wlmtk_window_is_minimized(wlmtk_window_from_dlnode(dlnode_ptr));
+         --n) {
+        dlnode_ptr = dlnode_ptr->prev_ptr;
+        if (NULL == dlnode_ptr) dlnode_ptr = workspace_ptr->windows.tail_ptr;
+    }
+    if (NULL != dlnode_ptr &&
+        wlmtk_window_is_minimized(wlmtk_window_from_dlnode(dlnode_ptr))) {
+        return;
+    }
 
     if (NULL == dlnode_ptr) return;
 
@@ -880,6 +892,18 @@ void wlmtk_workspace_activate_next_window(
     }
     if (NULL == dlnode_ptr) {
         dlnode_ptr = workspace_ptr->windows.head_ptr;
+    }
+    // Skip minimized windows: Cycling must not restore them on the way.
+    for (size_t n = bs_dllist_size(&workspace_ptr->windows);
+         NULL != dlnode_ptr && 0 < n &&
+             wlmtk_window_is_minimized(wlmtk_window_from_dlnode(dlnode_ptr));
+         --n) {
+        dlnode_ptr = dlnode_ptr->next_ptr;
+        if (NULL == dlnode_ptr) dlnode_ptr = workspace_ptr->windows.head_ptr;
+    }
+    if (NULL != dlnode_ptr &&
+        wlmtk_window_is_minimized(wlmtk_window_from_dlnode(dlnode_ptr))) {
+        return;
     }
 
     if (NULL == dlnode_ptr) return;

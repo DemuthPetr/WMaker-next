@@ -58,11 +58,50 @@ static char *_app_icon_resolve_name(
 
 /* == Exported methods ===================================================== */
 
+/** Number of cached lookups: Alt+Tab resolves icons on each key press. */
+#define _APP_ICON_CACHE_SIZE 64
+
+/** A cached lookup result. `path_ptr` NULL means: no icon found. */
+typedef struct {
+    /** App ID, or NULL for an unused slot. */
+    char                      *app_id_ptr;
+    /** Resolved path, or NULL. */
+    char                      *path_ptr;
+} _app_icon_cache_entry_t;
+
+/** Cache of lookups, used round-robin. */
+static _app_icon_cache_entry_t _app_icon_cache[_APP_ICON_CACHE_SIZE];
+/** Next slot to (re)use. */
+static size_t _app_icon_cache_next;
+
+static char *_app_icon_find_uncached(const char *app_id_ptr);
+
 /* ------------------------------------------------------------------------- */
 char *wlmaker_app_icon_find(const char *app_id_ptr)
 {
     if (NULL == app_id_ptr || 0 == *app_id_ptr) return NULL;
 
+    for (size_t i = 0; i < _APP_ICON_CACHE_SIZE; ++i) {
+        _app_icon_cache_entry_t *e = &_app_icon_cache[i];
+        if (NULL != e->app_id_ptr && 0 == strcmp(e->app_id_ptr, app_id_ptr)) {
+            return NULL != e->path_ptr ? logged_strdup(e->path_ptr) : NULL;
+        }
+    }
+
+    char *path_ptr = _app_icon_find_uncached(app_id_ptr);
+    _app_icon_cache_entry_t *e = &_app_icon_cache[_app_icon_cache_next];
+    _app_icon_cache_next = (_app_icon_cache_next + 1) % _APP_ICON_CACHE_SIZE;
+    free(e->app_id_ptr);
+    free(e->path_ptr);
+    e->app_id_ptr = logged_strdup(app_id_ptr);
+    e->path_ptr = NULL != path_ptr ? logged_strdup(path_ptr) : NULL;
+    return path_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
+/** Looks up the icon of `app_id_ptr`. See @ref wlmaker_app_icon_find. */
+char *_app_icon_find_uncached(const char *app_id_ptr)
+{
     _app_icon_dirs_t dirs;
     _app_icon_dirs_init(&dirs);
 
