@@ -669,10 +669,29 @@ void _wlmtk_surface_handle_surface_commit(
     wlmtk_surface_t *surface_ptr = BS_CONTAINER_OF(
         listener_ptr, wlmtk_surface_t, surface_commit_listener);
 
-    _wlmtk_surface_commit_size(
-        surface_ptr,
-        surface_ptr->wlr_surface_ptr->current.width,
-        surface_ptr->wlr_surface_ptr->current.height);
+    int width = surface_ptr->wlr_surface_ptr->current.width;
+    int height = surface_ptr->wlr_surface_ptr->current.height;
+
+    // XDG surfaces may draw shadows around the window, and declare the
+    // window proper as their geometry. wlroots positions the surface at
+    // -geometry.xy; take the geometry's size and clip the shadows away, so
+    // they neither widen the window's decoration nor cover it.
+    if (NULL != surface_ptr->wlr_xdg_surface_ptr &&
+        NULL != surface_ptr->wlr_scene_tree_ptr) {
+        struct wlr_box geo = surface_ptr->wlr_xdg_surface_ptr->current.geometry;
+        if (0 < geo.width && 0 < geo.height) {
+            width = geo.width;
+            height = geo.height;
+            struct wl_list *children_ptr =
+                &surface_ptr->wlr_scene_tree_ptr->children;
+            if (!wl_list_empty(children_ptr)) {
+                struct wlr_scene_node *node_ptr = wl_container_of(
+                    children_ptr->next, node_ptr, link);
+                wlr_scene_subsurface_tree_set_clip(node_ptr, &geo);
+            }
+        }
+    }
+    _wlmtk_surface_commit_size(surface_ptr, width, height);
 }
 
 /* ------------------------------------------------------------------------- */

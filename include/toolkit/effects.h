@@ -20,6 +20,7 @@
 #ifndef __WLMTK_EFFECTS_H__
 #define __WLMTK_EFFECTS_H__
 
+#include <libbase/libbase.h>
 #include <stdbool.h>
 
 #include "element.h"
@@ -73,10 +74,11 @@ typedef void (*wlmtk_effects_done_fn)(wlmtk_element_t *element_ptr,
                                       void *ud_ptr);
 
 /**
- * Animates the element's opacity and a vertical offset from its current
- * (base) position, over the configured duration. Replaces an animation
- * running for the same element. At the end, the element is at its base
- * position plus `to_dy`, and `done_fn` is called.
+ * Animates the element's opacity and a vertical offset, over the configured
+ * duration. The offset is added to the element's position, which may still
+ * change meanwhile (eg. a menu placed at the pointer). Replaces an animation
+ * running for the same element. At the end, the offset is removed again and
+ * `done_fn` is called.
  *
  * @param element_ptr
  * @param from_opacity
@@ -98,8 +100,8 @@ bool wlmtk_effects_animate(
     void *ud_ptr);
 
 /**
- * Cancels an animation of the element, if any: Puts it back at its base
- * position. Does not call the `done_fn`.
+ * Cancels an animation of the element, if any: Removes its offset. Does not
+ * call the `done_fn`.
  *
  * @param element_ptr
  *
@@ -109,6 +111,9 @@ bool wlmtk_effects_cancel(wlmtk_element_t *element_ptr);
 
 /** @return whether the element is animating. */
 bool wlmtk_effects_is_animating(wlmtk_element_t *element_ptr);
+
+/** Unit test cases. */
+extern const bs_test_set_t wlmtk_effects_test_set;
 
 #ifdef __cplusplus
 }  // extern "C"

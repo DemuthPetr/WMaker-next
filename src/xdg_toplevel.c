@@ -767,8 +767,8 @@ void _wlmaker_xdg_toplevel_handle_surface_commit(
             wxt_ptr->wlr_xdg_toplevel_ptr->base->surface,
             &geo);
     }
-    wlmtk_window_commit_size(
-        wxt_ptr->window_ptr, geo.width - geo.x, geo.height - geo.y);
+    // The geometry's size; its x, y only offset shadows (handled by wlroots).
+    wlmtk_window_commit_size(wxt_ptr->window_ptr, geo.width, geo.height);
 
     if (0 != wxt_ptr->pending.properties) {
         _wlmaker_xdg_toplevel_flush_properties(wxt_ptr);
