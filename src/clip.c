@@ -39,6 +39,7 @@
 
 #include "backend/backend.h"
 #include "backend/output_config.h"
+#include "dock.h"
 #include "files.h"
 #include "toolkit/toolkit.h"
 
@@ -96,6 +97,8 @@ struct _wlmaker_clip_t {
 
     /** The clip's style. */
     wlmaker_config_clip_style_t style;
+    /** Tile size from the state's `TileSize`, or 0 for the theme's. */
+    uint64_t                  tile_size;
 };
 
 static bool _wlmaker_clip_pointer_axis(
@@ -105,6 +108,9 @@ static bool _wlmaker_clip_pointer_button(
     wlmtk_element_t *element_ptr,
     const wlmtk_button_event_t *button_event_ptr);
 
+static void _wlmaker_clip_apply_style(
+    wlmaker_clip_t *clip_ptr,
+    const wlmaker_config_style_t *style_ptr);
 static bool _wlmaker_clip_update_tiles(
     wlmaker_clip_t *clip_ptr,
     const struct wlmtk_tile_style *tile_style_ptr);
@@ -309,6 +315,8 @@ wlmaker_clip_t *wlmaker_clip_create(
         &clip_ptr->output_layout_change_listener.link);
 
     server_ptr->clip_dock_ptr = clip_ptr->wlmtk_dock_ptr;
+    // Tile size and lines, as the state says.
+    wlmaker_clip_set_state(clip_ptr, state_dict_ptr);
     bs_log(BS_INFO, "Created clip %p", clip_ptr);
     return clip_ptr;
 }
@@ -325,6 +333,13 @@ bool wlmaker_clip_set_state(
         bs_log(BS_WARNING, "No valid 'Clip' dict found in state.");
         return false;
     }
+    wlmaker_pane_layout_t layout;
+    wlmaker_pane_layout_decode(dict_ptr, &layout);
+    if (layout.tile_size != clip_ptr->tile_size) {
+        clip_ptr->tile_size = layout.tile_size;
+        _wlmaker_clip_apply_style(clip_ptr, clip_ptr->server_ptr->style_ptr);
+    }
+    wlmtk_dock_set_lines(clip_ptr->wlmtk_dock_ptr, layout.lines, layout.snake);
     return wlmtk_dock_set_positioning(
         clip_ptr->wlmtk_dock_ptr, &args.positioning);
 }
@@ -923,18 +938,27 @@ void _wlmaker_clip_handle_theme_changed(
 {
     wlmaker_clip_t *clip_ptr = BS_CONTAINER_OF(
         listener_ptr, wlmaker_clip_t, theme_changed_listener);
-    wlmaker_config_style_t *style_ptr = data_ptr;
+    _wlmaker_clip_apply_style(clip_ptr, data_ptr);
+}
 
-    if (!_wlmaker_clip_update_tiles(clip_ptr, &style_ptr->tile)) return;
+/* ------------------------------------------------------------------------- */
+/** Applies the theme's style, with the clip's tile size, to the clip. */
+void _wlmaker_clip_apply_style(
+    wlmaker_clip_t *clip_ptr,
+    const wlmaker_config_style_t *style_ptr)
+{
+    struct wlmtk_tile_style tile = wlmaker_pane_tile_style(
+        clip_ptr->tile_size, &style_ptr->tile);
+    if (!_wlmaker_clip_update_tiles(clip_ptr, &tile)) return;
     if (!_wlmaker_clip_update_overlay(
-            clip_ptr, &style_ptr->tile, &style_ptr->clip)) return;
-    if (!_wlmaker_clip_update_image(clip_ptr, &style_ptr->tile)) return;
+            clip_ptr, &tile, &style_ptr->clip)) return;
+    if (!_wlmaker_clip_update_image(clip_ptr, &tile)) return;
     clip_ptr->style = style_ptr->clip;
 
     wlmtk_dock_set_style(
         clip_ptr->wlmtk_dock_ptr,
         &style_ptr->dock,
-        &style_ptr->tile);
+        &tile);
 
     // Need to apply the button state (again) after @ref wlmtk_dock_set_style,
     // since the latter will apply the generic tile backend. Which the tile

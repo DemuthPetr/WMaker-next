@@ -252,8 +252,18 @@ bool wlmtk_dock_set_positioning(
     wlmtk_box_orientation_t axis = _wlmtk_dock_orientation(dock_ptr);
     dock_ptr->tile_box.orientation = WLMTK_BOX_VERTICAL == axis ?
         WLMTK_BOX_HORIZONTAL : WLMTK_BOX_VERTICAL;
+    // Boxes position elements along their axis only: Clear the other
+    // coordinate, left over from the previous orientation.
     for (int l = 0; l < WLMTK_DOCK_MAX_LINES; ++l) {
         dock_ptr->line_boxes[l].orientation = axis;
+        wlmtk_element_set_position(
+            wlmtk_box_element(&dock_ptr->line_boxes[l]), 0, 0);
+    }
+    for (bs_dllist_node_t *dlnode_ptr = dock_ptr->tiles.head_ptr;
+         NULL != dlnode_ptr;
+         dlnode_ptr = dlnode_ptr->next_ptr) {
+        wlmtk_element_set_position(
+            wlmtk_tile_element(wlmtk_tile_from_dlnode(dlnode_ptr)), 0, 0);
     }
     _wlmtk_dock_arrange(dock_ptr);
     return true;

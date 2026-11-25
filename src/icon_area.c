@@ -26,6 +26,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <wayland-server-core.h>
 #include <wayland-util.h>
 
@@ -37,6 +38,7 @@
 
 #include "app_icon.h"
 #include "backend/backend.h"
+#include "dock.h"
 #include "toolkit/toolkit.h"
 
 /* == Declarations ========================================================= */
@@ -49,6 +51,10 @@ struct _wlmaker_icon_area_t {
     wlmaker_server_t          *server_ptr;
     /** Tile style, for creating mini-windows. */
     struct wlmtk_tile_style   tile_style;
+    /** Tile size from the state's `TileSize`, or 0 for the theme's. */
+    uint64_t                  tile_size;
+    /** Order of the mini-windows: As minimized (0), by title (1), by app (2). */
+    int                       sort;
 
     /** Mini-windows, @ref wlmaker_miniwindow_t::dlnode. */
     bs_dllist_t               miniwindows;
@@ -112,6 +118,10 @@ static wlmaker_miniwindow_t *_wlmaker_icon_area_find(
     wlmaker_icon_area_t *icon_area_ptr,
     wlmtk_window_t *window_ptr);
 static void _wlmaker_icon_area_sync(wlmaker_icon_area_t *icon_area_ptr);
+static void _wlmaker_icon_area_sort(wlmaker_icon_area_t *icon_area_ptr);
+static void _wlmaker_icon_area_apply_style(
+    wlmaker_icon_area_t *icon_area_ptr,
+    const wlmaker_config_style_t *style_ptr);
 static void _wlmaker_icon_area_attach(wlmaker_icon_area_t *icon_area_ptr);
 
 static void _wlmaker_icon_area_handle_window_minimize_changed(
@@ -136,6 +146,21 @@ static const bspl_enum_desc_t _wlmaker_icon_area_edges[] = {
     BSPL_ENUM("LEFT", WLR_EDGE_LEFT),
     BSPL_ENUM("RIGHT", WLR_EDGE_RIGHT),
     BSPL_ENUM_SENTINEL(),
+};
+
+/** Enum descriptor for the order of mini-windows. */
+static const bspl_enum_desc_t _wlmaker_icon_area_sorts[] = {
+    BSPL_ENUM("Minimized", 0),
+    BSPL_ENUM("Name", 1),
+    BSPL_ENUM("Application", 2),
+    BSPL_ENUM_SENTINEL(),
+};
+
+/** Descriptor for the `Sort` of the state's `IconArea` dict. */
+static const bspl_desc_t _wlmaker_icon_area_sort_desc[] = {
+    BSPL_DESC_ENUM("Sort", false, wlmaker_icon_area_t, sort, sort, 0,
+                   _wlmaker_icon_area_sorts),
+    BSPL_DESC_SENTINEL(),
 };
 
 /** Descriptor for the state's `IconArea` dict. */
@@ -223,6 +248,21 @@ bool wlmaker_icon_area_set_state(
         !bspl_decode_dict(dict_ptr, _wlmaker_icon_area_desc, &positioning)) {
         bs_log(BS_WARNING, "Invalid 'IconArea' dict in state, ignoring.");
     }
+    icon_area_ptr->sort = 0;
+    if (NULL != dict_ptr &&
+        !bspl_decode_dict(dict_ptr, _wlmaker_icon_area_sort_desc, icon_area_ptr)) {
+        icon_area_ptr->sort = 0;
+    }
+    wlmaker_pane_layout_t layout;
+    wlmaker_pane_layout_decode(dict_ptr, &layout);
+    if (layout.tile_size != icon_area_ptr->tile_size) {
+        icon_area_ptr->tile_size = layout.tile_size;
+        _wlmaker_icon_area_apply_style(
+            icon_area_ptr, icon_area_ptr->server_ptr->style_ptr);
+    }
+    wlmtk_dock_set_lines(
+        icon_area_ptr->wlmtk_dock_ptr, layout.lines, layout.snake);
+    _wlmaker_icon_area_sort(icon_area_ptr);
     return wlmtk_dock_set_positioning(
         icon_area_ptr->wlmtk_dock_ptr, &positioning);
 }
@@ -570,8 +610,61 @@ void _wlmaker_icon_area_sync(wlmaker_icon_area_t *icon_area_ptr)
         any_docked |= show;
     }
 
+    _wlmaker_icon_area_sort(icon_area_ptr);
     wlmtk_element_set_visible(
         wlmtk_dock_element(icon_area_ptr->wlmtk_dock_ptr), any_docked);
+}
+
+/* ------------------------------------------------------------------------- */
+/** Key of a mini-window for sorting, see @ref wlmaker_icon_area_t::sort. */
+static const char *_wlmaker_miniwindow_sort_key(
+    wlmaker_miniwindow_t *mw_ptr,
+    int sort)
+{
+    const char *key_ptr = 2 == sort ?
+        wlmtk_window_get_app_id(mw_ptr->window_ptr) :
+        wlmtk_window_get_title(mw_ptr->window_ptr);
+    return NULL != key_ptr ? key_ptr : "";
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Orders the docked mini-windows: As minimized (the list's order), or by
+ * title or application, then as minimized.
+ */
+void _wlmaker_icon_area_sort(wlmaker_icon_area_t *icon_area_ptr)
+{
+    size_t n = 0;
+    for (bs_dllist_node_t *dlnode_ptr = icon_area_ptr->miniwindows.head_ptr;
+         NULL != dlnode_ptr; dlnode_ptr = dlnode_ptr->next_ptr) {
+        wlmaker_miniwindow_t *mw_ptr = BS_CONTAINER_OF(
+            dlnode_ptr, wlmaker_miniwindow_t, dlnode);
+        if (mw_ptr->docked) ++n;
+    }
+    if (n < 2) return;
+    wlmaker_miniwindow_t **mws_ptr = logged_calloc(n, sizeof(*mws_ptr));
+    if (NULL == mws_ptr) return;
+    size_t i = 0;
+    for (bs_dllist_node_t *dlnode_ptr = icon_area_ptr->miniwindows.head_ptr;
+         NULL != dlnode_ptr; dlnode_ptr = dlnode_ptr->next_ptr) {
+        wlmaker_miniwindow_t *mw_ptr = BS_CONTAINER_OF(
+            dlnode_ptr, wlmaker_miniwindow_t, dlnode);
+        if (!mw_ptr->docked) continue;
+        // Stable insertion sort, in the list's (minimize) order.
+        size_t j = i++;
+        for (; j > 0 && 0 != icon_area_ptr->sort &&
+                 0 < strcasecmp(
+                     _wlmaker_miniwindow_sort_key(mws_ptr[j - 1], icon_area_ptr->sort),
+                     _wlmaker_miniwindow_sort_key(mw_ptr, icon_area_ptr->sort)); --j) {
+            mws_ptr[j] = mws_ptr[j - 1];
+        }
+        mws_ptr[j] = mw_ptr;
+    }
+    for (i = 0; i < n; ++i) {
+        wlmtk_dock_move_tile(
+            icon_area_ptr->wlmtk_dock_ptr, &mws_ptr[i]->super_tile, i);
+    }
+    free(mws_ptr);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -650,19 +743,28 @@ void _wlmaker_icon_area_handle_theme_changed(
 {
     wlmaker_icon_area_t *icon_area_ptr = BS_CONTAINER_OF(
         listener_ptr, wlmaker_icon_area_t, theme_changed_listener);
-    wlmaker_config_style_t *style_ptr = data_ptr;
+    _wlmaker_icon_area_apply_style(icon_area_ptr, data_ptr);
+}
 
-    icon_area_ptr->tile_style = style_ptr->tile;
+/* ------------------------------------------------------------------------- */
+/** Applies the theme's style, with the icon area's tile size. */
+void _wlmaker_icon_area_apply_style(
+    wlmaker_icon_area_t *icon_area_ptr,
+    const wlmaker_config_style_t *style_ptr)
+{
+    icon_area_ptr->tile_style = wlmaker_pane_tile_style(
+        icon_area_ptr->tile_size, &style_ptr->tile);
     // Applies to docked tiles only; undocked ones pick it up when docked.
     wlmtk_dock_set_style(
-        icon_area_ptr->wlmtk_dock_ptr, &style_ptr->dock, &style_ptr->tile);
+        icon_area_ptr->wlmtk_dock_ptr, &style_ptr->dock,
+        &icon_area_ptr->tile_style);
     for (bs_dllist_node_t *dlnode_ptr = icon_area_ptr->miniwindows.head_ptr;
          NULL != dlnode_ptr;
          dlnode_ptr = dlnode_ptr->next_ptr) {
         wlmaker_miniwindow_t *mw_ptr = BS_CONTAINER_OF(
             dlnode_ptr, wlmaker_miniwindow_t, dlnode);
         if (!mw_ptr->docked) {
-            wlmtk_tile_set_style(&mw_ptr->super_tile, &style_ptr->tile);
+            wlmtk_tile_set_style(&mw_ptr->super_tile, &icon_area_ptr->tile_style);
         }
     }
 }

@@ -162,7 +162,46 @@ const bspl_desc_t _wlmaker_dock_desc[] = {
     BSPL_DESC_SENTINEL(),
 };
 
+/** Descriptor for a pane's layout, see @ref wlmaker_pane_layout_decode. */
+static const bspl_desc_t _wlmaker_pane_layout_desc[] = {
+    BSPL_DESC_INT64("Lines", false, parse_args, lines, lines, 1),
+    BSPL_DESC_ENUM("Order", false, parse_args, order, order, 1,
+                   _wlmaker_dock_orders),
+    BSPL_DESC_UINT64("TileSize", false, parse_args, tile_size, tile_size, 0),
+    BSPL_DESC_SENTINEL(),
+};
+
 /* == Exported methods ===================================================== */
+
+/* ------------------------------------------------------------------------- */
+void wlmaker_pane_layout_decode(
+    bspl_dict_t *dict_ptr,
+    wlmaker_pane_layout_t *layout_ptr)
+{
+    parse_args args = { .lines = 1, .order = 1 };
+    if (NULL != dict_ptr &&
+        !bspl_decode_dict(dict_ptr, _wlmaker_pane_layout_desc, &args)) {
+        bs_log(BS_WARNING, "Invalid Lines, Order or TileSize, using defaults.");
+        args = (parse_args){ .lines = 1, .order = 1 };
+    }
+    layout_ptr->lines = BS_MIN(BS_MAX(args.lines, 1), WLMTK_DOCK_MAX_LINES);
+    layout_ptr->snake = 1 == args.order;
+    layout_ptr->tile_size = args.tile_size;
+}
+
+/* ------------------------------------------------------------------------- */
+struct wlmtk_tile_style wlmaker_pane_tile_style(
+    uint64_t tile_size,
+    const struct wlmtk_tile_style *theme_tile_style_ptr)
+{
+    struct wlmtk_tile_style style = *theme_tile_style_ptr;
+    if (0 < tile_size && 0 < style.size) {
+        uint64_t size = BS_MIN(BS_MAX(tile_size, 24u), 256u);
+        style.content_size = style.content_size * size / style.size;
+        style.size = size;
+    }
+    return style;
+}
 
 /* ------------------------------------------------------------------------- */
 wlmaker_dock_t *wlmaker_dock_create(
@@ -437,13 +476,7 @@ struct wlmtk_tile_style _wlmaker_dock_tile_style(
     wlmaker_dock_t *dock_ptr,
     const struct wlmtk_tile_style *theme_tile_style_ptr)
 {
-    struct wlmtk_tile_style style = *theme_tile_style_ptr;
-    if (0 < dock_ptr->tile_size && 0 < style.size) {
-        uint64_t size = BS_MIN(BS_MAX(dock_ptr->tile_size, 24u), 256u);
-        style.content_size = style.content_size * size / style.size;
-        style.size = size;
-    }
-    return style;
+    return wlmaker_pane_tile_style(dock_ptr->tile_size, theme_tile_style_ptr);
 }
 
 /* ------------------------------------------------------------------------- */

@@ -54,6 +54,34 @@ wlmaker_dock_t *wlmaker_dock_create(
     bspl_dict_t *state_dict_ptr,
     const wlmaker_config_style_t *style_ptr);
 
+/** Layout of a pane (dock, clip, icon area), from its dict in the state. */
+typedef struct {
+    /** `Lines`: Number of lines (rows or columns) of tiles, 1..3. */
+    int64_t                   lines;
+    /** `Order`: Every other line runs back (Snake), or all alike (Straight). */
+    bool                      snake;
+    /** `TileSize`: Size of the pane's tiles; 0 for the theme's. */
+    uint64_t                  tile_size;
+} wlmaker_pane_layout_t;
+
+/**
+ * Decodes `Lines`, `Order` and `TileSize` of a pane's state dict. Missing or
+ * invalid values keep their defaults: 1 line, Snake, the theme's tile size.
+ *
+ * @param dict_ptr            May be NULL.
+ * @param layout_ptr
+ */
+void wlmaker_pane_layout_decode(
+    bspl_dict_t *dict_ptr,
+    wlmaker_pane_layout_t *layout_ptr);
+
+/**
+ * @return The theme's tile style, scaled to `tile_size` (0: unchanged).
+ */
+struct wlmtk_tile_style wlmaker_pane_tile_style(
+    uint64_t tile_size,
+    const struct wlmtk_tile_style *theme_tile_style_ptr);
+
 /**
  * Destroys the Dock handle.
  *
