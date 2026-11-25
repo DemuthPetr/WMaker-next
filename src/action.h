@@ -147,6 +147,19 @@ wlmaker_action_handle_t *wlmaker_action_bind_keys(
 void wlmaker_action_unbind_keys(wlmaker_action_handle_t *handle_ptr);
 
 /**
+ * Loads a theme file and applies it: To windows, menus, background, cursor,
+ * and through @ref wlmaker_server_t::theme_changed_event to docks & clip.
+ *
+ * @param server_ptr
+ * @param fname_ptr           Theme file, or NULL for the default theme.
+ *
+ * @return true on success.
+ */
+bool wlmaker_action_theme_load(
+    wlmaker_server_t *server_ptr,
+    const char *fname_ptr);
+
+/**
  * Executes the given action on wlmaker.
  *
  * @param server_ptr

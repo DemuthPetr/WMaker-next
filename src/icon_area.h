@@ -48,6 +48,19 @@ wlmaker_icon_area_t *wlmaker_icon_area_create(
     const wlmaker_config_style_t *style_ptr);
 
 /**
+ * Applies the state's optional `IconArea` positioning (`Edge`, `Anchor`;
+ * default: bottom edge, from the left): Moves the icon area.
+ *
+ * @param icon_area_ptr
+ * @param state_dict_ptr
+ *
+ * @return true on success.
+ */
+bool wlmaker_icon_area_set_state(
+    wlmaker_icon_area_t *icon_area_ptr,
+    bspl_dict_t *state_dict_ptr);
+
+/**
  * Destroys the icon area.
  *
  * @param icon_area_ptr

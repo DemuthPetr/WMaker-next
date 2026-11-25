@@ -236,6 +236,30 @@ void wlmtk_dock_remove_tile(
 }
 
 /* ------------------------------------------------------------------------- */
+bool wlmtk_dock_set_positioning(
+    wlmtk_dock_t *dock_ptr,
+    const wlmtk_dock_positioning_t *dock_positioning_ptr)
+{
+    wlmtk_dock_positioning_t old_positioning = dock_ptr->dock_positioning;
+    dock_ptr->dock_positioning = *dock_positioning_ptr;
+    wlmtk_panel_positioning_t panel_positioning = {};
+    if (!_wlmtk_dock_positioning(dock_ptr, &panel_positioning)) {
+        dock_ptr->dock_positioning = old_positioning;
+        return false;
+    }
+
+    _wlmtk_dock_clear_lines(dock_ptr);
+    wlmtk_box_orientation_t axis = _wlmtk_dock_orientation(dock_ptr);
+    dock_ptr->tile_box.orientation = WLMTK_BOX_VERTICAL == axis ?
+        WLMTK_BOX_HORIZONTAL : WLMTK_BOX_VERTICAL;
+    for (int l = 0; l < WLMTK_DOCK_MAX_LINES; ++l) {
+        dock_ptr->line_boxes[l].orientation = axis;
+    }
+    _wlmtk_dock_arrange(dock_ptr);
+    return true;
+}
+
+/* ------------------------------------------------------------------------- */
 void wlmtk_dock_set_lines(wlmtk_dock_t *dock_ptr, int lines, bool snake)
 {
     dock_ptr->lines = BS_MIN(BS_MAX(lines, 1), WLMTK_DOCK_MAX_LINES);

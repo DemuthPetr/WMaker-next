@@ -110,6 +110,19 @@ void wlmtk_dock_remove_tile(
     wlmtk_dock_t *dock_ptr,
     wlmtk_tile_t *tile_ptr);
 
+/**
+ * Moves the dock: To another edge (switching between a row and a column) or
+ * anchor. Fails, without changes, if the anchor isn't adjacent to the edge.
+ *
+ * @param dock_ptr
+ * @param dock_positioning_ptr
+ *
+ * @return true on success.
+ */
+bool wlmtk_dock_set_positioning(
+    wlmtk_dock_t *dock_ptr,
+    const wlmtk_dock_positioning_t *dock_positioning_ptr);
+
 /** Maximum number of lines (rows or columns) of tiles in a dock. */
 #define WLMTK_DOCK_MAX_LINES 3
 

@@ -95,9 +95,6 @@ static void _wlmaker_action_hide(
     wlmaker_server_t *server_ptr,
     wlmtk_window_t *app_window_ptr,
     bool others);
-static bool _wlmaker_action_theme_load_from_file(
-    wlmaker_server_t *server_ptr,
-    const char *fname_ptr);
 static void _wlmaker_action_show_desktop(wlmaker_server_t *server_ptr);
 
 /* == Data ================================================================= */
@@ -539,7 +536,7 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
         break;
 
     case WLMAKER_ACTION_THEME_LOAD_FROM_FILE:
-        _wlmaker_action_theme_load_from_file(server_ptr, arg_ptr);
+        wlmaker_action_theme_load(server_ptr, arg_ptr);
         break;
 
     case WLMAKER_ACTION_OUTPUT_MAGNIFY:
@@ -874,8 +871,7 @@ bool _wlmaker_action_bound_callback(
 }
 
 /* ------------------------------------------------------------------------- */
-/** Loads a theme file and applies it. */
-bool _wlmaker_action_theme_load_from_file(
+bool wlmaker_action_theme_load(
     wlmaker_server_t *server_ptr,
     const char *fname_ptr)
 {

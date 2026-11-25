@@ -129,6 +129,24 @@ static void _wlmaker_icon_area_handle_theme_changed(
 
 /* == Data ================================================================= */
 
+/** Enum descriptor for `enum wlr_edges`. */
+static const bspl_enum_desc_t _wlmaker_icon_area_edges[] = {
+    BSPL_ENUM("TOP", WLR_EDGE_TOP),
+    BSPL_ENUM("BOTTOM", WLR_EDGE_BOTTOM),
+    BSPL_ENUM("LEFT", WLR_EDGE_LEFT),
+    BSPL_ENUM("RIGHT", WLR_EDGE_RIGHT),
+    BSPL_ENUM_SENTINEL(),
+};
+
+/** Descriptor for the state's `IconArea` dict. */
+static const bspl_desc_t _wlmaker_icon_area_desc[] = {
+    BSPL_DESC_ENUM("Edge", false, wlmtk_dock_positioning_t, edge, edge,
+                   WLR_EDGE_BOTTOM, _wlmaker_icon_area_edges),
+    BSPL_DESC_ENUM("Anchor", false, wlmtk_dock_positioning_t, anchor, anchor,
+                   WLR_EDGE_LEFT, _wlmaker_icon_area_edges),
+    BSPL_DESC_SENTINEL(),
+};
+
 /** The mini-window's extension to @ref wlmtk_element_vmt_t. */
 static const wlmtk_element_vmt_t _wlmaker_miniwindow_element_vmt = {
     .destroy = _wlmaker_miniwindow_element_destroy,
@@ -189,6 +207,24 @@ wlmaker_icon_area_t *wlmaker_icon_area_create(
 
     bs_log(BS_INFO, "Created icon area %p", icon_area_ptr);
     return icon_area_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmaker_icon_area_set_state(
+    wlmaker_icon_area_t *icon_area_ptr,
+    bspl_dict_t *state_dict_ptr)
+{
+    wlmtk_dock_positioning_t positioning = {
+        .edge = WLR_EDGE_BOTTOM,
+        .anchor = WLR_EDGE_LEFT,
+    };
+    bspl_dict_t *dict_ptr = bspl_dict_get_dict(state_dict_ptr, "IconArea");
+    if (NULL != dict_ptr &&
+        !bspl_decode_dict(dict_ptr, _wlmaker_icon_area_desc, &positioning)) {
+        bs_log(BS_WARNING, "Invalid 'IconArea' dict in state, ignoring.");
+    }
+    return wlmtk_dock_set_positioning(
+        icon_area_ptr->wlmtk_dock_ptr, &positioning);
 }
 
 /* ------------------------------------------------------------------------- */

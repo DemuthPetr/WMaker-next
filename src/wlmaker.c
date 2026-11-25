@@ -160,6 +160,23 @@ static bs_ptr_stack_t         wlmaker_subprocess_stack;
 
 /** Compiled regular expression for extracting file & line no. from wlr_log. */
 static regex_t                wlmaker_wlr_log_regex;
+
+/** File lookup, kept for reloading. */
+static wlmaker_files_t        *wlmaker_files_ptr = NULL;
+/** Current configuration. Key bindings refer to it. */
+static bspl_dict_t            *wlmaker_config_dict_ptr = NULL;
+/** Current state. */
+static bspl_dict_t            *wlmaker_state_dict_ptr = NULL;
+/** The theme file currently applied, or NULL for the default theme. */
+static char                   *wlmaker_theme_file_ptr = NULL;
+/** Key bindings, from @ref wlmaker_config_dict_ptr. */
+static wlmaker_action_handle_t *wlmaker_action_handle_ptr = NULL;
+/** The dock. */
+static wlmaker_dock_t         *wlmaker_dock_ptr = NULL;
+/** The clip. */
+static wlmaker_clip_t         *wlmaker_clip_ptr = NULL;
+/** The icon area, holding mini-windows. */
+static wlmaker_icon_area_t    *wlmaker_icon_area_ptr = NULL;
 /** Regular expression string for extracting file & line no. from wlr_log. */
 static const char             *wlmaker_wlr_log_regex_string =
     "^\\[([^\\:]+)\\:([0-9]+)\\]\\ ";
@@ -251,6 +268,185 @@ bool start_subprocess(const char *cmdline_ptr)
     return true;
 }
 
+/** The "Effects" configuration, as decoded. See @ref wlmtk_effects_t. */
+typedef struct {
+    /** Opacity of the activated window. */
+    double                    active_opacity;
+    /** Opacity of other windows. */
+    double                    inactive_opacity;
+    /** Animate minimize and restore. */
+    bool                      animate_minimize;
+    /** Fade in new windows. */
+    bool                      animate_map;
+    /** Animation duration, milliseconds. */
+    int64_t                   duration_ms;
+} _wlmaker_effects_config_t;
+
+/** Decoder for the "Effects" dict of the configuration. */
+static const bspl_desc_t _wlmaker_effects_desc[] = {
+    BSPL_DESC_DOUBLE("ActiveOpacity", false, _wlmaker_effects_config_t,
+                     active_opacity, active_opacity, 1.0),
+    BSPL_DESC_DOUBLE("InactiveOpacity", false, _wlmaker_effects_config_t,
+                     inactive_opacity, inactive_opacity, 1.0),
+    BSPL_DESC_BOOL("AnimateMinimize", false, _wlmaker_effects_config_t,
+                   animate_minimize, animate_minimize, false),
+    BSPL_DESC_BOOL("AnimateMap", false, _wlmaker_effects_config_t,
+                   animate_map, animate_map, false),
+    BSPL_DESC_INT64("DurationMs", false, _wlmaker_effects_config_t,
+                    duration_ms, duration_ms, 180),
+    BSPL_DESC_SENTINEL()
+};
+
+/* ------------------------------------------------------------------------- */
+/** Applies look & feel effects from the config's optional "Effects" dict. */
+static void _wlmaker_apply_effects(
+    wlmaker_server_t *server_ptr,
+    bspl_dict_t *config_dict_ptr)
+{
+    _wlmaker_effects_config_t ec = { .active_opacity = 1.0,
+                                     .inactive_opacity = 1.0,
+                                     .duration_ms = 180 };
+    bspl_dict_t *effects_dict_ptr = bspl_dict_get_dict(
+        config_dict_ptr, "Effects");
+    if (NULL != effects_dict_ptr &&
+        !bspl_decode_dict(effects_dict_ptr, _wlmaker_effects_desc, &ec)) {
+        bs_log(BS_WARNING, "Failed to decode 'Effects', using defaults.");
+    }
+    wlmtk_effects_t effects = {
+        .active_opacity = ec.active_opacity,
+        .inactive_opacity = ec.inactive_opacity,
+        .animate_minimize = ec.animate_minimize,
+        .animate_map = ec.animate_map,
+        .duration_ms = (int)ec.duration_ms,
+    };
+    wlmtk_effects_set(&effects,
+                      wl_display_get_event_loop(server_ptr->wl_display_ptr));
+}
+
+/* ------------------------------------------------------------------------- */
+/** @return the theme file configured: --theme_file, or config's ThemeFile. */
+static const char *_wlmaker_theme_file(bspl_dict_t *config_dict_ptr)
+{
+    if (NULL != wlmaker_arg_theme_file_ptr) return wlmaker_arg_theme_file_ptr;
+    return bspl_dict_get_string_value(config_dict_ptr, "ThemeFile");
+}
+
+/* ------------------------------------------------------------------------- */
+/** Re-reads the configuration: Theme, effects, key bindings, root menu. */
+static void _wlmaker_reload_config(wlmaker_server_t *server_ptr)
+{
+    bspl_dict_t *config_dict_ptr = wlmaker_config_load(
+        wlmaker_files_ptr, wlmaker_arg_config_file_ptr);
+    if (NULL == config_dict_ptr) {
+        bs_log(BS_WARNING, "Failed to reload configuration, keeping it.");
+        return;
+    }
+
+    const char *theme_file_ptr = _wlmaker_theme_file(config_dict_ptr);
+    bool theme_changed = (NULL == theme_file_ptr) !=
+        (NULL == wlmaker_theme_file_ptr) ||
+        (NULL != theme_file_ptr &&
+         0 != strcmp(theme_file_ptr, wlmaker_theme_file_ptr));
+    if (theme_changed) {
+        if (wlmaker_action_theme_load(server_ptr, theme_file_ptr)) {
+            free(wlmaker_theme_file_ptr);
+            wlmaker_theme_file_ptr = NULL;
+            if (NULL != theme_file_ptr) {
+                wlmaker_theme_file_ptr = logged_strdup(theme_file_ptr);
+            }
+            bs_log(BS_INFO, "Applied theme %s",
+                   NULL != theme_file_ptr ? theme_file_ptr : "(default)");
+        } else {
+            bs_log(BS_WARNING, "Failed to load theme %s", theme_file_ptr);
+        }
+    }
+
+    _wlmaker_apply_effects(server_ptr, config_dict_ptr);
+
+    // Key bindings: Replace. If the new ones fail, restore the previous.
+    wlmaker_action_unbind_keys(wlmaker_action_handle_ptr);
+    wlmaker_action_handle_ptr = wlmaker_action_bind_keys(
+        server_ptr,
+        bspl_dict_get_dict(config_dict_ptr, wlmaker_action_config_dict_key),
+        wlmaker_server_options.bind_with_logo);
+    if (NULL == wlmaker_action_handle_ptr) {
+        bs_log(BS_WARNING, "Failed to bind new keys, restoring previous.");
+        wlmaker_action_handle_ptr = wlmaker_action_bind_keys(
+            server_ptr,
+            bspl_dict_get_dict(wlmaker_config_dict_ptr,
+                               wlmaker_action_config_dict_key),
+            wlmaker_server_options.bind_with_logo);
+        bspl_dict_unref(config_dict_ptr);
+    } else {
+        bspl_dict_unref(wlmaker_config_dict_ptr);
+        wlmaker_config_dict_ptr = config_dict_ptr;
+    }
+
+    // Root menu: Re-create from its file, unless it's open right now.
+    if (NULL != server_ptr->root_menu_ptr &&
+        NULL == wlmtk_window_get_workspace(
+            wlmaker_root_menu_window(server_ptr->root_menu_ptr))) {
+        wlmaker_root_menu_destroy(server_ptr->root_menu_ptr);
+        server_ptr->root_menu_ptr = wlmaker_root_menu_create(
+            server_ptr,
+            wlmaker_arg_root_menu_file_ptr,
+            wlmtk_window_style_to_ref(server_ptr->style_ptr->window_style_ptr),
+            wlmtk_menu_style_to_ref(server_ptr->style_ptr->menu_style_ptr));
+        if (NULL != server_ptr->root_menu_ptr) {
+            wlmtk_menu_set_open(
+                wlmaker_root_menu_menu(server_ptr->root_menu_ptr), false);
+        } else {
+            bs_log(BS_WARNING, "Failed to re-create the root menu.");
+        }
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+/** Re-reads the state: Re-creates the dock, moves the clip and icon area. */
+static void _wlmaker_reload_state(wlmaker_server_t *server_ptr)
+{
+    bspl_dict_t *state_dict_ptr = wlmaker_state_load(
+        wlmaker_files_ptr, wlmaker_arg_state_file_ptr);
+    if (NULL == state_dict_ptr) {
+        bs_log(BS_WARNING, "Failed to reload state, keeping it.");
+        return;
+    }
+
+    wlmaker_dock_t *dock_ptr = wlmaker_dock_create(
+        server_ptr, state_dict_ptr, server_ptr->style_ptr);
+    if (NULL != dock_ptr) {
+        if (NULL != wlmaker_dock_ptr) wlmaker_dock_destroy(wlmaker_dock_ptr);
+        wlmaker_dock_ptr = dock_ptr;
+    } else {
+        bs_log(BS_WARNING, "Failed to re-create the dock, keeping it.");
+    }
+    if (NULL != wlmaker_clip_ptr) {
+        wlmaker_clip_set_state(wlmaker_clip_ptr, state_dict_ptr);
+    }
+    if (NULL != wlmaker_icon_area_ptr) {
+        wlmaker_icon_area_set_state(wlmaker_icon_area_ptr, state_dict_ptr);
+    }
+
+    bspl_dict_unref(wlmaker_state_dict_ptr);
+    wlmaker_state_dict_ptr = state_dict_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Handles SIGHUP: Re-reads configuration and state, and applies them. Sent
+ * by wmaker-next-settings, so changes show without restarting the session.
+ */
+static int _wlmaker_handle_sighup(
+    __UNUSED__ int signal_number,
+    void *data_ptr)
+{
+    wlmaker_server_t *server_ptr = data_ptr;
+    bs_log(BS_INFO, "SIGHUP: Reloading configuration and state.");
+    _wlmaker_reload_config(server_ptr);
+    _wlmaker_reload_state(server_ptr);
+    return 0;
+}
+
 /* ------------------------------------------------------------------------- */
 /** Creates workspaces as configured in the state dict. */
 bool create_workspaces(
@@ -310,35 +506,6 @@ bool create_workspaces(
 }
 
 /* == Main program ========================================================= */
-/** The main program. */
-/** The "Effects" configuration, as decoded. See @ref wlmtk_effects_t. */
-typedef struct {
-    /** Opacity of the activated window. */
-    double                    active_opacity;
-    /** Opacity of other windows. */
-    double                    inactive_opacity;
-    /** Animate minimize and restore. */
-    bool                      animate_minimize;
-    /** Fade in new windows. */
-    bool                      animate_map;
-    /** Animation duration, milliseconds. */
-    int64_t                   duration_ms;
-} _wlmaker_effects_config_t;
-
-/** Decoder for the "Effects" dict of the configuration. */
-static const bspl_desc_t _wlmaker_effects_desc[] = {
-    BSPL_DESC_DOUBLE("ActiveOpacity", false, _wlmaker_effects_config_t,
-                     active_opacity, active_opacity, 1.0),
-    BSPL_DESC_DOUBLE("InactiveOpacity", false, _wlmaker_effects_config_t,
-                     inactive_opacity, inactive_opacity, 1.0),
-    BSPL_DESC_BOOL("AnimateMinimize", false, _wlmaker_effects_config_t,
-                   animate_minimize, animate_minimize, false),
-    BSPL_DESC_BOOL("AnimateMap", false, _wlmaker_effects_config_t,
-                   animate_map, animate_map, false),
-    BSPL_DESC_INT64("DurationMs", false, _wlmaker_effects_config_t,
-                    duration_ms, duration_ms, 180),
-    BSPL_DESC_SENTINEL()
-};
 
 /* ------------------------------------------------------------------------- */
 /** State of scripted test actions, see @ref _wlmaker_test_actions_start. */
@@ -426,14 +593,12 @@ static void _wlmaker_child_reset_signals(void)
     signal(SIGCHLD, SIG_DFL);
 }
 
+/** The main program. */
 int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
 {
     // Every process we start (apps, menus, Xwayland) starts unblocked.
     pthread_atfork(NULL, NULL, _wlmaker_child_reset_signals);
 
-    wlmaker_dock_t            *dock_ptr = NULL;
-    wlmaker_clip_t            *clip_ptr = NULL;
-    wlmaker_icon_area_t       *icon_area_ptr = NULL;
     wlmaker_foreign_toplevel_t *foreign_toplevel_ptr = NULL;
     wlmaker_task_list_t       *task_list_ptr = NULL;
     int                       rv = EXIT_SUCCESS;
@@ -482,6 +647,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
            wlmaker_version_full);
 
     wlmaker_files_t *files_ptr = wlmaker_files_create("wlmaker");
+    wlmaker_files_ptr = files_ptr;
     if (NULL == files_ptr) {
         bs_log(BS_ERROR, "Failed wlmaker_files_create(\"wlmaker\")");
         return EXIT_FAILURE;
@@ -489,7 +655,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
 
     bspl_dict_t *config_dict_ptr = wlmaker_config_load(
         files_ptr, wlmaker_arg_config_file_ptr);
-    if (NULL != wlmaker_arg_config_file_ptr) free(wlmaker_arg_config_file_ptr);
+    wlmaker_config_dict_ptr = config_dict_ptr;
     if (NULL == config_dict_ptr) {
         fprintf(stderr, "Failed to load & initialize configuration.\n");
         return EXIT_FAILURE;
@@ -497,16 +663,15 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
 
     bspl_dict_t *state_dict_ptr = wlmaker_state_load(
         files_ptr, wlmaker_arg_state_file_ptr);
-    if (NULL != wlmaker_arg_state_file_ptr) free(wlmaker_arg_state_file_ptr);
+    wlmaker_state_dict_ptr = state_dict_ptr;
     if (NULL == state_dict_ptr) {
         fprintf(stderr, "Failed to load & initialize state.\n");
         return EXIT_FAILURE;
     }
 
-    const char *theme_file_ptr = wlmaker_arg_theme_file_ptr;
-    if (NULL == theme_file_ptr) {
-        theme_file_ptr = bspl_dict_get_string_value(
-            config_dict_ptr, "ThemeFile");
+    const char *theme_file_ptr = _wlmaker_theme_file(config_dict_ptr);
+    if (NULL != theme_file_ptr) {
+        wlmaker_theme_file_ptr = logged_strdup(theme_file_ptr);
     }
     wlmaker_config_style_t style = {};
     if (!wlmaker_theme_load(files_ptr, theme_file_ptr, &style)) {
@@ -518,25 +683,10 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
         config_dict_ptr, files_ptr, &style, &wlmaker_server_options);
     if (NULL == server_ptr) return EXIT_FAILURE;
 
-    // Look & feel effects, from the optional "Effects" dict.
-    _wlmaker_effects_config_t ec = { .active_opacity = 1.0,
-                                     .inactive_opacity = 1.0,
-                                     .duration_ms = 180 };
-    bspl_dict_t *effects_dict_ptr = bspl_dict_get_dict(
-        config_dict_ptr, "Effects");
-    if (NULL != effects_dict_ptr &&
-        !bspl_decode_dict(effects_dict_ptr, _wlmaker_effects_desc, &ec)) {
-        bs_log(BS_WARNING, "Failed to decode 'Effects', using defaults.");
-    }
-    wlmtk_effects_t effects = {
-        .active_opacity = ec.active_opacity,
-        .inactive_opacity = ec.inactive_opacity,
-        .animate_minimize = ec.animate_minimize,
-        .animate_map = ec.animate_map,
-        .duration_ms = (int)ec.duration_ms,
-    };
-    wlmtk_effects_set(&effects,
-                      wl_display_get_event_loop(server_ptr->wl_display_ptr));
+    _wlmaker_apply_effects(server_ptr, config_dict_ptr);
+    struct wl_event_source *sighup_source_ptr = wl_event_loop_add_signal(
+        wl_display_get_event_loop(server_ptr->wl_display_ptr),
+        SIGHUP, _wlmaker_handle_sighup, server_ptr);
 
     // TODO(kaeser@gubbe.ch): Uh, that's ugly...
     server_ptr->root_menu_ptr = wlmaker_root_menu_create(
@@ -555,11 +705,11 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
         return EXIT_FAILURE;
     }
 
-    wlmaker_action_handle_t *action_handle_ptr = wlmaker_action_bind_keys(
+    wlmaker_action_handle_ptr = wlmaker_action_bind_keys(
         server_ptr,
         bspl_dict_get_dict(config_dict_ptr, wlmaker_action_config_dict_key),
         wlmaker_server_options.bind_with_logo);
-    if (NULL == action_handle_ptr) {
+    if (NULL == wlmaker_action_handle_ptr) {
         bs_log(BS_ERROR, "Failed to bind keys.");
         return EXIT_FAILURE;
     }
@@ -591,18 +741,22 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
             }
         }
 
-        dock_ptr = wlmaker_dock_create(
+        wlmaker_dock_ptr = wlmaker_dock_create(
             server_ptr, state_dict_ptr, &style);
-        clip_ptr = wlmaker_clip_create(
+        wlmaker_clip_ptr = wlmaker_clip_create(
             server_ptr, state_dict_ptr, &style);
-        icon_area_ptr = wlmaker_icon_area_create(server_ptr, &style);
+        wlmaker_icon_area_ptr = wlmaker_icon_area_create(server_ptr, &style);
+        if (NULL != wlmaker_icon_area_ptr) {
+            wlmaker_icon_area_set_state(wlmaker_icon_area_ptr, state_dict_ptr);
+        }
         foreign_toplevel_ptr = wlmaker_foreign_toplevel_create(server_ptr);
         if (NULL == foreign_toplevel_ptr) {
             bs_log(BS_WARNING, "Failed to create foreign toplevel manager.");
         }
         task_list_ptr = wlmaker_task_list_create(
             server_ptr, &style.task_list);
-        if (NULL == dock_ptr || NULL == clip_ptr || NULL == icon_area_ptr ||
+        if (NULL == wlmaker_dock_ptr || NULL == wlmaker_clip_ptr ||
+            NULL == wlmaker_icon_area_ptr ||
             NULL == task_list_ptr) {
             bs_log(BS_ERROR,
                    "Failed to create dock, clip, icon area or task list.");
@@ -620,10 +774,13 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     if (NULL != foreign_toplevel_ptr) {
         wlmaker_foreign_toplevel_destroy(foreign_toplevel_ptr);
     }
-    if (NULL != icon_area_ptr) wlmaker_icon_area_destroy(icon_area_ptr);
-    if (NULL != clip_ptr) wlmaker_clip_destroy(clip_ptr);
-    if (NULL != dock_ptr) wlmaker_dock_destroy(dock_ptr);
-    wlmaker_action_unbind_keys(action_handle_ptr);
+    if (NULL != sighup_source_ptr) wl_event_source_remove(sighup_source_ptr);
+    if (NULL != wlmaker_icon_area_ptr) {
+        wlmaker_icon_area_destroy(wlmaker_icon_area_ptr);
+    }
+    if (NULL != wlmaker_clip_ptr) wlmaker_clip_destroy(wlmaker_clip_ptr);
+    if (NULL != wlmaker_dock_ptr) wlmaker_dock_destroy(wlmaker_dock_ptr);
+    wlmaker_action_unbind_keys(wlmaker_action_handle_ptr);
     bspl_array_unref(server_ptr->root_menu_array_ptr);
     wlmaker_server_destroy(server_ptr);
 
@@ -634,8 +791,11 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     bs_ptr_stack_fini(&wlmaker_subprocess_stack);
 
     bspl_decoded_destroy(wlmaker_config_style_desc, &style);
-    bspl_dict_unref(config_dict_ptr);
-    bspl_dict_unref(state_dict_ptr);
+    bspl_dict_unref(wlmaker_config_dict_ptr);
+    bspl_dict_unref(wlmaker_state_dict_ptr);
+    free(wlmaker_theme_file_ptr);
+    free(wlmaker_arg_config_file_ptr);
+    free(wlmaker_arg_state_file_ptr);
     regfree(&wlmaker_wlr_log_regex);
     return rv;
 }

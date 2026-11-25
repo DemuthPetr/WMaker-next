@@ -55,6 +55,18 @@ wlmaker_clip_t *wlmaker_clip_create(
     const wlmaker_config_style_t *style_ptr);
 
 /**
+ * Applies the state's `Clip` positioning (`Edge`, `Anchor`): Moves the clip.
+ *
+ * @param clip_ptr
+ * @param state_dict_ptr
+ *
+ * @return true on success.
+ */
+bool wlmaker_clip_set_state(
+    wlmaker_clip_t *clip_ptr,
+    bspl_dict_t *state_dict_ptr);
+
+/**
  * Destroys the Clip.
  *
  * @param clip_ptr

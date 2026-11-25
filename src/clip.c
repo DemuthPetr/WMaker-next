@@ -314,6 +314,22 @@ wlmaker_clip_t *wlmaker_clip_create(
 }
 
 /* ------------------------------------------------------------------------- */
+bool wlmaker_clip_set_state(
+    wlmaker_clip_t *clip_ptr,
+    bspl_dict_t *state_dict_ptr)
+{
+    parse_args args = {};
+    bspl_dict_t *dict_ptr = bspl_dict_get_dict(state_dict_ptr, "Clip");
+    if (NULL == dict_ptr ||
+        !bspl_decode_dict(dict_ptr, _wlmaker_clip_desc, &args)) {
+        bs_log(BS_WARNING, "No valid 'Clip' dict found in state.");
+        return false;
+    }
+    return wlmtk_dock_set_positioning(
+        clip_ptr->wlmtk_dock_ptr, &args.positioning);
+}
+
+/* ------------------------------------------------------------------------- */
 void wlmaker_clip_destroy(wlmaker_clip_t *clip_ptr)
 {
     if (NULL != clip_ptr->server_ptr) {
