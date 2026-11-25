@@ -100,6 +100,12 @@ bool wlmtk_effects_animate(
     void *ud_ptr);
 
 /**
+ * Advances running animations to now. Called by each output right before
+ * rendering a frame, so the animation is sampled in step with the display.
+ */
+void wlmtk_effects_frame(void);
+
+/**
  * Cancels an animation of the element, if any: Removes its offset. Does not
  * call the `done_fn`.
  *

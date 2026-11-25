@@ -22,6 +22,7 @@
 #include "test.h"
 
 #include <libbase/libbase.h>
+#include <math.h>
 #include <stdlib.h>
 #include <time.h>
 #include <wayland-server-core.h>
@@ -53,14 +54,17 @@ typedef struct {
     /** Vertical offset range, relative to the base position. */
     int                       from_dy, to_dy;
     /** Start time, in milliseconds (monotonic). */
-    uint64_t                  start_msec;
+    uint64_t                  start_nsec;
     /** Called when done. */
     wlmtk_effects_done_fn     done_fn;
     /** Argument to `done_fn`. */
     void                      *ud_ptr;
 } _wlmtk_animation_t;
 
-/** Animation frame interval, ~60 Hz. */
+/**
+ * Fallback timer interval. Animations step on output frames, see
+ * @ref wlmtk_effects_frame; the timer keeps them going without frames.
+ */
 static const int _wlmtk_effects_frame_msec = 16;
 
 /** Current effects: Opaque, no animations. */
@@ -79,6 +83,7 @@ static struct wl_event_source *_wlmtk_effects_timer_ptr;
 static bs_dllist_t _wlmtk_effects_animations;
 
 static int _wlmtk_effects_handle_timer(void *data_ptr);
+static void _wlmtk_effects_step(void);
 static _wlmtk_animation_t *_wlmtk_effects_find(wlmtk_element_t *element_ptr);
 static void _wlmtk_effects_set_dy(_wlmtk_animation_t *a_ptr, int dy);
 static void _wlmtk_effects_set_opacity_iterator(
@@ -151,7 +156,7 @@ bool wlmtk_effects_animate(
     a_ptr->to_opacity = to_opacity;
     a_ptr->from_dy = from_dy;
     a_ptr->to_dy = to_dy;
-    a_ptr->start_msec = bs_mono_nsec() / 1000000;
+    a_ptr->start_nsec = bs_mono_nsec();
     a_ptr->done_fn = done_fn;
     a_ptr->ud_ptr = ud_ptr;
     bs_dllist_push_back(&_wlmtk_effects_animations, &a_ptr->dlnode);
@@ -161,6 +166,13 @@ bool wlmtk_effects_animate(
     wl_event_source_timer_update(
         _wlmtk_effects_timer_ptr, _wlmtk_effects_frame_msec);
     return true;
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_effects_frame(void)
+{
+    if (NULL == _wlmtk_effects_animations.head_ptr) return;
+    _wlmtk_effects_step();
 }
 
 /* ------------------------------------------------------------------------- */
@@ -214,11 +226,19 @@ void _wlmtk_effects_set_dy(_wlmtk_animation_t *a_ptr, int dy)
 }
 
 /* ------------------------------------------------------------------------- */
-/** Advances all animations; completes those that are due. */
+/** Timer: Advances animations, when no output frame did. */
 int _wlmtk_effects_handle_timer(__UNUSED__ void *data_ptr)
 {
-    uint64_t now_msec = bs_mono_nsec() / 1000000;
-    int duration = BS_MAX(_wlmtk_effects.duration_ms, 1);
+    _wlmtk_effects_step();
+    return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/** Advances all animations to now; completes those that are due. */
+void _wlmtk_effects_step(void)
+{
+    uint64_t now_nsec = bs_mono_nsec();
+    double duration_nsec = 1e6 * BS_MAX(_wlmtk_effects.duration_ms, 1);
 
     bs_dllist_node_t *dlnode_ptr = _wlmtk_effects_animations.head_ptr;
     while (NULL != dlnode_ptr) {
@@ -226,16 +246,22 @@ int _wlmtk_effects_handle_timer(__UNUSED__ void *data_ptr)
             dlnode_ptr, _wlmtk_animation_t, dlnode);
         dlnode_ptr = dlnode_ptr->next_ptr;
 
-        double t = (double)(now_msec - a_ptr->start_msec) / duration;
+        double t = (double)(now_nsec - a_ptr->start_nsec) / duration_nsec;
         if (t > 1.0) t = 1.0;
-        // Ease out: Fast start, gentle end.
-        double e = 1.0 - (1.0 - t) * (1.0 - t);
+        double e;
+        if (a_ptr->from_dy != a_ptr->to_dy) {
+            // Moving: Ease in & out (cubic), no jolt at either end.
+            e = t < 0.5 ? 4 * t * t * t : 1.0 - 4 * (1.0 - t) * (1.0 - t) * (1.0 - t);
+        } else {
+            // Fading only: Ease out, fast start and gentle end.
+            e = 1.0 - (1.0 - t) * (1.0 - t);
+        }
         wlmtk_effects_apply_opacity(
             a_ptr->element_ptr,
             a_ptr->from_opacity + (a_ptr->to_opacity - a_ptr->from_opacity) * e);
         _wlmtk_effects_set_dy(
             a_ptr,
-            a_ptr->from_dy + (int)((a_ptr->to_dy - a_ptr->from_dy) * e));
+            a_ptr->from_dy + (int)lround((a_ptr->to_dy - a_ptr->from_dy) * e));
         if (t < 1.0) continue;
 
         // Back at the element's own position: The offset was just visual.
@@ -254,7 +280,6 @@ int _wlmtk_effects_handle_timer(__UNUSED__ void *data_ptr)
         wl_event_source_timer_update(
             _wlmtk_effects_timer_ptr, _wlmtk_effects_frame_msec);
     }
-    return 0;
 }
 
 /* ------------------------------------------------------------------------- */

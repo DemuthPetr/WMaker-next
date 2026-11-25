@@ -300,6 +300,7 @@ void _wlmbe_output_handle_frame(
     struct wlr_scene_output *wlr_scene_output_ptr = wlr_scene_get_scene_output(
         output_ptr->wlr_scene_ptr,
         output_ptr->wlr_output_ptr);
+    wlmtk_effects_frame();
     wlr_scene_output_commit(wlr_scene_output_ptr, NULL);
 
     struct timespec now;
