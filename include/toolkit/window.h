@@ -300,6 +300,14 @@ void wlmtk_window_set_activated(
 bool wlmtk_window_is_activated(wlmtk_window_t *window_ptr);
 
 /**
+ * Applies the configured opacity (@ref wlmtk_effects_t) for the window's
+ * activation state, unless it is animating.
+ *
+ * @param window_ptr
+ */
+void wlmtk_window_apply_effects_opacity(wlmtk_window_t *window_ptr);
+
+/**
  * Requests the window's size to be updated.
  *
  * @param window_ptr

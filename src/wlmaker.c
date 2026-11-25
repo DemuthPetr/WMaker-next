@@ -309,6 +309,35 @@ bool create_workspaces(
 
 /* == Main program ========================================================= */
 /** The main program. */
+/** The "Effects" configuration, as decoded. See @ref wlmtk_effects_t. */
+typedef struct {
+    /** Opacity of the activated window. */
+    double                    active_opacity;
+    /** Opacity of other windows. */
+    double                    inactive_opacity;
+    /** Animate minimize and restore. */
+    bool                      animate_minimize;
+    /** Fade in new windows. */
+    bool                      animate_map;
+    /** Animation duration, milliseconds. */
+    int64_t                   duration_ms;
+} _wlmaker_effects_config_t;
+
+/** Decoder for the "Effects" dict of the configuration. */
+static const bspl_desc_t _wlmaker_effects_desc[] = {
+    BSPL_DESC_DOUBLE("ActiveOpacity", false, _wlmaker_effects_config_t,
+                     active_opacity, active_opacity, 1.0),
+    BSPL_DESC_DOUBLE("InactiveOpacity", false, _wlmaker_effects_config_t,
+                     inactive_opacity, inactive_opacity, 1.0),
+    BSPL_DESC_BOOL("AnimateMinimize", false, _wlmaker_effects_config_t,
+                   animate_minimize, animate_minimize, false),
+    BSPL_DESC_BOOL("AnimateMap", false, _wlmaker_effects_config_t,
+                   animate_map, animate_map, false),
+    BSPL_DESC_INT64("DurationMs", false, _wlmaker_effects_config_t,
+                    duration_ms, duration_ms, 180),
+    BSPL_DESC_SENTINEL()
+};
+
 /* ------------------------------------------------------------------------- */
 /** State of scripted test actions, see @ref _wlmaker_test_actions_start. */
 typedef struct {
@@ -466,6 +495,26 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     wlmaker_server_t *server_ptr = wlmaker_server_create(
         config_dict_ptr, files_ptr, &style, &wlmaker_server_options);
     if (NULL == server_ptr) return EXIT_FAILURE;
+
+    // Look & feel effects, from the optional "Effects" dict.
+    _wlmaker_effects_config_t ec = { .active_opacity = 1.0,
+                                     .inactive_opacity = 1.0,
+                                     .duration_ms = 180 };
+    bspl_dict_t *effects_dict_ptr = bspl_dict_get_dict(
+        config_dict_ptr, "Effects");
+    if (NULL != effects_dict_ptr &&
+        !bspl_decode_dict(effects_dict_ptr, _wlmaker_effects_desc, &ec)) {
+        bs_log(BS_WARNING, "Failed to decode 'Effects', using defaults.");
+    }
+    wlmtk_effects_t effects = {
+        .active_opacity = ec.active_opacity,
+        .inactive_opacity = ec.inactive_opacity,
+        .animate_minimize = ec.animate_minimize,
+        .animate_map = ec.animate_map,
+        .duration_ms = (int)ec.duration_ms,
+    };
+    wlmtk_effects_set(&effects,
+                      wl_display_get_event_loop(server_ptr->wl_display_ptr));
 
     // TODO(kaeser@gubbe.ch): Uh, that's ugly...
     server_ptr->root_menu_ptr = wlmaker_root_menu_create(

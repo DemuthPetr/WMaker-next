@@ -21,6 +21,7 @@ set(public_header_files
   button.h
   container.h
   dock.h
+  effects.h
   element.h
   fsm.h
   gfxbuf.h
@@ -58,6 +59,7 @@ target_sources(toolkit PRIVATE
   button.c
   container.c
   dock.c
+  effects.c
   element.c
   fsm.c
   gfxbuf.c

@@ -40,6 +40,7 @@
 #include "bordered.h"
 #include "box.h"
 #include "container.h"
+#include "effects.h"
 #include "input.h"
 #include "menu_item.h"
 #include "resizebar.h"
@@ -302,6 +303,7 @@ error:
 /* ------------------------------------------------------------------------- */
 void wlmtk_window_destroy(wlmtk_window_t *window_ptr)
 {
+    wlmtk_effects_cancel(wlmtk_window_element(window_ptr));
     wlmtk_window_set_server_side_decorated(window_ptr, false);
 
     if (NULL != window_ptr->window_menu_ptr) {
@@ -516,6 +518,7 @@ void wlmtk_window_set_activated(
 
     window_ptr->activated = activated;
     wl_signal_emit(&window_ptr->events.set_activated, NULL);
+    wlmtk_window_apply_effects_opacity(window_ptr);
 
     if (NULL != window_ptr->titlebar_ptr) {
         wlmtk_titlebar_set_activated(window_ptr->titlebar_ptr, activated);
@@ -529,6 +532,21 @@ void wlmtk_window_set_activated(
             wlmtk_workspace_activate_window(window_ptr->workspace_ptr, NULL);
         }
     }
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_window_apply_effects_opacity(wlmtk_window_t *window_ptr)
+{
+    wlmtk_element_t *element_ptr = wlmtk_window_element(window_ptr);
+    // A running animation drives the opacity; it applies this when done.
+    if (wlmtk_effects_is_animating(element_ptr)) return;
+    const wlmtk_effects_t *effects_ptr = wlmtk_effects_get();
+    double opacity = window_ptr->activated ?
+        effects_ptr->active_opacity : effects_ptr->inactive_opacity;
+    // Fully opaque is the default: Skip touching buffers then.
+    if (1.0 <= effects_ptr->active_opacity &&
+        1.0 <= effects_ptr->inactive_opacity) return;
+    wlmtk_effects_apply_opacity(element_ptr, opacity);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -556,6 +574,8 @@ void wlmtk_window_commit_size(
     wlmtk_window_t *window_ptr,
     int width, int height)
 {
+    // New (sub)surface buffers start opaque.
+    wlmtk_window_apply_effects_opacity(window_ptr);
     window_ptr->committed_size = (struct wlr_box){
         .width = width, .height = height };
 

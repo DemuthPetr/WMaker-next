@@ -37,6 +37,7 @@
 #undef WLR_USE_UNSTABLE
 
 #include "container.h"
+#include "effects.h"
 #include "fsm.h"
 #include "input.h"
 #include "layer.h"
@@ -167,6 +168,13 @@ static void _wlmtk_workspace_place_window(
 static void _wlmtk_workspace_emit_minimize_changed(
     wlmtk_workspace_t *workspace_ptr,
     wlmtk_window_t *window_ptr);
+static void _wlmtk_workspace_minimize_animation_done(
+    wlmtk_element_t *element_ptr,
+    void *ud_ptr);
+static void _wlmtk_workspace_show_animation_done(
+    wlmtk_element_t *element_ptr,
+    void *ud_ptr);
+static double _wlmtk_workspace_target_opacity(wlmtk_window_t *window_ptr);
 
 static bool pfsm_move_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
 static bool pfsm_move_motion(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
@@ -583,6 +591,14 @@ void wlmtk_workspace_map_window(wlmtk_workspace_t *workspace_ptr,
                          wlmtk_dlnode_from_window(window_ptr));
     wlmtk_window_set_workspace(window_ptr, workspace_ptr);
     wlmtk_workspace_activate_window(workspace_ptr, window_ptr);
+    if (wlmtk_effects_get()->animate_map) {
+        wlmtk_effects_animate(
+            wlmtk_window_element(window_ptr),
+            0.0, _wlmtk_workspace_target_opacity(window_ptr), 12, 0,
+            _wlmtk_workspace_show_animation_done, NULL);
+    } else {
+        wlmtk_window_apply_effects_opacity(window_ptr);
+    }
 
     if (NULL != workspace_ptr->root_ptr) {
         wl_signal_emit(
@@ -598,6 +614,7 @@ void wlmtk_workspace_unmap_window(wlmtk_workspace_t *workspace_ptr,
     bool need_activation = false;
 
     BS_ASSERT(workspace_ptr == wlmtk_window_get_workspace(window_ptr));
+    wlmtk_effects_cancel(wlmtk_window_element(window_ptr));
 
     if (workspace_ptr->grabbed_window_ptr == window_ptr) {
         wlmtk_fsm_event(&workspace_ptr->fsm, PFSME_RESET, NULL);
@@ -671,7 +688,14 @@ void wlmtk_workspace_minimize_window(wlmtk_workspace_t *workspace_ptr,
     }
 
     wlmtk_window_set_minimized(window_ptr, true);
-    wlmtk_element_set_visible(wlmtk_window_element(window_ptr), false);
+    // Fade and slide down toward the icon area; hidden when done.
+    if (!wlmtk_effects_get()->animate_minimize ||
+        !wlmtk_effects_animate(
+            wlmtk_window_element(window_ptr),
+            _wlmtk_workspace_target_opacity(window_ptr), 0.0, 0, 80,
+            _wlmtk_workspace_minimize_animation_done, NULL)) {
+        wlmtk_element_set_visible(wlmtk_window_element(window_ptr), false);
+    }
     _wlmtk_workspace_emit_minimize_changed(workspace_ptr, window_ptr);
 
     if (need_activation) {
@@ -681,7 +705,10 @@ void wlmtk_workspace_minimize_window(wlmtk_workspace_t *workspace_ptr,
              NULL != dlnode_ptr && NULL == next_ptr;
              dlnode_ptr = dlnode_ptr->next_ptr) {
             wlmtk_element_t *element_ptr = wlmtk_element_from_dlnode(dlnode_ptr);
-            if (element_ptr->visible) {
+            // Minimized windows may still be visible, while animating.
+            if (element_ptr->visible &&
+                !wlmtk_window_is_minimized(
+                    wlmtk_window_from_element(element_ptr))) {
                 next_ptr = wlmtk_window_from_element(element_ptr);
             }
         }
@@ -699,10 +726,19 @@ void wlmtk_workspace_restore_window(wlmtk_workspace_t *workspace_ptr,
         !wlmtk_window_is_minimized(window_ptr)) return;
 
     wlmtk_window_set_minimized(window_ptr, false);
+    bool was_hidden = !wlmtk_window_element(window_ptr)->visible;
+    wlmtk_effects_cancel(wlmtk_window_element(window_ptr));
     wlmtk_element_set_visible(wlmtk_window_element(window_ptr), true);
     wlmtk_workspace_raise_window(workspace_ptr, window_ptr);
     _wlmtk_workspace_emit_minimize_changed(workspace_ptr, window_ptr);
     wlmtk_workspace_activate_window(workspace_ptr, window_ptr);
+    if (wlmtk_effects_get()->animate_minimize) {
+        wlmtk_effects_animate(
+            wlmtk_window_element(window_ptr),
+            was_hidden ? 0.0 : 0.5, _wlmtk_workspace_target_opacity(window_ptr),
+            was_hidden ? 80 : 20, 0,
+            _wlmtk_workspace_show_animation_done, NULL);
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -978,6 +1014,39 @@ wlmtk_workspace_t *wlmtk_workspace_from_dlnode(
 }
 
 /* == Local (static) methods =============================================== */
+
+/* ------------------------------------------------------------------------- */
+/** Minimize animation done: Hide the window (unless restored since). */
+void _wlmtk_workspace_minimize_animation_done(
+    wlmtk_element_t *element_ptr,
+    __UNUSED__ void *ud_ptr)
+{
+    wlmtk_window_t *window_ptr = wlmtk_window_from_element(element_ptr);
+    if (!wlmtk_window_is_minimized(window_ptr)) return;
+    wlmtk_element_set_visible(element_ptr, false);
+    // Base position again; full opacity for when it's restored.
+    wlmtk_effects_apply_opacity(element_ptr, 1.0);
+    wlmtk_window_apply_effects_opacity(window_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+/** Map or restore animation done: Settle at the configured opacity. */
+void _wlmtk_workspace_show_animation_done(
+    wlmtk_element_t *element_ptr,
+    __UNUSED__ void *ud_ptr)
+{
+    wlmtk_effects_apply_opacity(element_ptr, 1.0);
+    wlmtk_window_apply_effects_opacity(wlmtk_window_from_element(element_ptr));
+}
+
+/* ------------------------------------------------------------------------- */
+/** @return The opacity a window settles at, after showing animations. */
+double _wlmtk_workspace_target_opacity(wlmtk_window_t *window_ptr)
+{
+    const wlmtk_effects_t *e = wlmtk_effects_get();
+    return wlmtk_window_is_activated(window_ptr) ?
+        e->active_opacity : e->inactive_opacity;
+}
 
 /* ------------------------------------------------------------------------- */
 /** Raises @ref wlmtk_root_events_t::window_minimize_changed, if rooted. */
