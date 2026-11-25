@@ -172,10 +172,15 @@ void wlmtk_layer_output_reconfigure(
 {
     struct wlr_box usable_area = layer_output_ptr->extents;
 
+    // Panels reserving an exclusive zone go first, regardless of the order
+    // they were added: Others (eg. the dock) must keep clear of them.
+    for (int pass = 0; pass < 2; ++pass) {
     for (bs_dllist_node_t *dlnode_ptr = layer_output_ptr->panels.head_ptr;
          dlnode_ptr != NULL;
          dlnode_ptr = dlnode_ptr->next_ptr) {
         wlmtk_panel_t *panel_ptr = wlmtk_panel_from_dlnode(dlnode_ptr);
+        bool exclusive = 0 < panel_ptr->positioning.exclusive_zone;
+        if ((0 == pass) != exclusive) continue;
 
         struct wlr_box new_usable_area = usable_area;
         struct wlr_box panel_dimensions = wlmtk_panel_compute_dimensions(
@@ -193,6 +198,7 @@ void wlmtk_layer_output_reconfigure(
             wlmtk_panel_element(panel_ptr),
             panel_dimensions.x,
             panel_dimensions.y);
+    }
     }
 }
 
