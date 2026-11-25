@@ -28,6 +28,7 @@
 #include <wayland-server-protocol.h>
 #define WLR_USE_UNSTABLE
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/box.h>
@@ -51,6 +52,8 @@ struct _wlmaker_xdg_popup_t {
 
     /** Seat. */
     struct wlr_seat           *wlr_seat_ptr;
+    /** Output layout, for keeping the popup on its output. May be NULL. */
+    struct wlr_output_layout  *wlr_output_layout_ptr;
     /** The WLR popup. */
     struct wlr_xdg_popup      *wlr_xdg_popup_ptr;
 };
@@ -84,12 +87,14 @@ static void handle_surface_commit(
 /* ------------------------------------------------------------------------- */
 wlmaker_xdg_popup_t *wlmaker_xdg_popup_create(
     struct wlr_xdg_popup *wlr_xdg_popup_ptr,
-    struct wlr_seat *wlr_seat_ptr)
+    struct wlr_seat *wlr_seat_ptr,
+    struct wlr_output_layout *wlr_output_layout_ptr)
 {
     wlmaker_xdg_popup_t *wlmaker_xdg_popup_ptr = logged_calloc(
         1, sizeof(wlmaker_xdg_popup_t));
     if (NULL == wlmaker_xdg_popup_ptr) return NULL;
     wlmaker_xdg_popup_ptr->wlr_seat_ptr = wlr_seat_ptr;
+    wlmaker_xdg_popup_ptr->wlr_output_layout_ptr = wlr_output_layout_ptr;
     wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr = wlr_xdg_popup_ptr;
 
     if (!wlmtk_base_init(&wlmaker_xdg_popup_ptr->base, NULL)) {
@@ -174,6 +179,66 @@ wlmtk_element_t *wlmaker_xdg_popup_element(
 /* == Local (static) methods =============================================== */
 
 /* ------------------------------------------------------------------------- */
+/**
+ * Keeps the popup on the output it opens on: Flips or slides it there, as
+ * far as its positioner allows (eg. a menu from a panel at the bottom opens
+ * upwards). Updates the scheduled geometry and the element's position.
+ */
+static void _wlmaker_xdg_popup_unconstrain(
+    wlmaker_xdg_popup_t *wlmaker_xdg_popup_ptr)
+{
+    struct wlr_xdg_popup *popup_ptr = wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr;
+    wlmtk_element_t *element_ptr = wlmaker_xdg_popup_element(
+        wlmaker_xdg_popup_ptr);
+    if (NULL == wlmaker_xdg_popup_ptr->wlr_output_layout_ptr ||
+        NULL == element_ptr->wlr_scene_node_ptr) return;
+
+    // The popup shows at its parent's origin, offset by its geometry.
+    int lx, ly;
+    if (!wlr_scene_node_coords(element_ptr->wlr_scene_node_ptr, &lx, &ly)) {
+        return;
+    }
+    int parent_x = lx - popup_ptr->scheduled.geometry.x;
+    int parent_y = ly - popup_ptr->scheduled.geometry.y;
+
+    // The output holding the anchor; else the one closest to it.
+    const struct wlr_box *anchor_ptr = &popup_ptr->scheduled.rules.anchor_rect;
+    double ax = parent_x + anchor_ptr->x + anchor_ptr->width / 2.0;
+    double ay = parent_y + anchor_ptr->y + anchor_ptr->height / 2.0;
+    struct wlr_output *wlr_output_ptr = wlr_output_layout_output_at(
+        wlmaker_xdg_popup_ptr->wlr_output_layout_ptr, ax, ay);
+    if (NULL == wlr_output_ptr) {
+        double cx, cy;
+        wlr_output_layout_closest_point(
+            wlmaker_xdg_popup_ptr->wlr_output_layout_ptr, NULL, ax, ay,
+            &cx, &cy);
+        wlr_output_ptr = wlr_output_layout_output_at(
+            wlmaker_xdg_popup_ptr->wlr_output_layout_ptr, cx, cy);
+    }
+    if (NULL == wlr_output_ptr) return;
+    struct wlr_box output_box;
+    wlr_output_layout_get_box(
+        wlmaker_xdg_popup_ptr->wlr_output_layout_ptr, wlr_output_ptr,
+        &output_box);
+
+    // wlroots takes the box relative to the root surface, and subtracts the
+    // parent's offset in there: Pre-add it, to land in the parent's space.
+    int root_x, root_y;
+    wlr_xdg_popup_get_toplevel_coords(popup_ptr, 0, 0, &root_x, &root_y);
+    struct wlr_box box = {
+        .x = output_box.x - parent_x + root_x,
+        .y = output_box.y - parent_y + root_y,
+        .width = output_box.width,
+        .height = output_box.height,
+    };
+    wlr_xdg_popup_unconstrain_from_box(popup_ptr, &box);
+    wlmtk_element_set_position(
+        element_ptr,
+        popup_ptr->scheduled.geometry.x,
+        popup_ptr->scheduled.geometry.y);
+}
+
+/* ------------------------------------------------------------------------- */
 /** Handles repositioning. */
 void handle_reposition(
     struct wl_listener *listener_ptr,
@@ -186,6 +251,7 @@ void handle_reposition(
         wlmtk_base_element(&wlmaker_xdg_popup_ptr->base),
         wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr->scheduled.geometry.x,
         wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr->scheduled.geometry.y);
+    _wlmaker_xdg_popup_unconstrain(wlmaker_xdg_popup_ptr);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -212,7 +278,8 @@ void handle_new_popup(
 
     wlmaker_xdg_popup_t *new_popup_ptr = wlmaker_xdg_popup_create(
         wlr_xdg_popup_ptr,
-        wlmaker_xdg_popup_ptr->wlr_seat_ptr);
+        wlmaker_xdg_popup_ptr->wlr_seat_ptr,
+        wlmaker_xdg_popup_ptr->wlr_output_layout_ptr);
     if (NULL == new_popup_ptr) {
         wl_resource_post_error(
             wlr_xdg_popup_ptr->resource,
@@ -242,6 +309,7 @@ void handle_surface_commit(
         // Initial commit: Ensure a configure is responded with.
         wlr_xdg_surface_schedule_configure(
             wlmaker_xdg_popup_ptr->wlr_xdg_popup_ptr->base);
+        _wlmaker_xdg_popup_unconstrain(wlmaker_xdg_popup_ptr);
     }
 }
 

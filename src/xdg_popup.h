@@ -33,6 +33,8 @@ struct wlr_xdg_popup;
 /** Forward declaration: State of the toolkit's XDG popup. */
 typedef struct _wlmaker_xdg_popup_t wlmaker_xdg_popup_t;
 
+struct wlr_output_layout;
+
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
@@ -42,12 +44,15 @@ extern "C" {
  *
  * @param wlr_xdg_popup_ptr
  * @param wlr_seat_ptr
+ * @param wlr_output_layout_ptr For keeping the popup on its output. May be
+ *                            NULL: Then it's placed as the client asks.
  *
  * @return Popup handle or NULL on error.
  */
 wlmaker_xdg_popup_t *wlmaker_xdg_popup_create(
     struct wlr_xdg_popup *wlr_xdg_popup_ptr,
-    struct wlr_seat *wlr_seat_ptr);
+    struct wlr_seat *wlr_seat_ptr,
+    struct wlr_output_layout *wlr_output_layout_ptr);
 
 /**
  * Destroys the popup.
