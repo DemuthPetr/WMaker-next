@@ -64,6 +64,13 @@ wlmtk_pointer_t *wlmtk_pointer_create(
 
     pointer_ptr->wlr_cursor_ptr = wlr_cursor_ptr;
     pointer_ptr->wlr_xcursor_manager_ptr = wlr_xcursor_manager_ptr;
+    // Show the default image right away: Elements set one only when the
+    // pointer moves over them, so it was invisible after login.
+    if (NULL != wlr_cursor_ptr && NULL != wlr_xcursor_manager_ptr) {
+        wlr_cursor_set_xcursor(
+            wlr_cursor_ptr, wlr_xcursor_manager_ptr,
+            _wlmtk_pointer_cursor_names[pointer_ptr->cursor]);
+    }
     return pointer_ptr;
 }
 

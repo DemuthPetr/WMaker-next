@@ -406,14 +406,13 @@ struct wlr_buffer *_wlmaker_miniwindow_create_overlay(
     double max_width = s - 4.0 * s / 64.0;
     cairo_text_extents_t extents;
     cairo_text_extents(cairo_ptr, text, &extents);
-    for (size_t len = strlen(text);
-         extents.x_advance > max_width && len > 3;
-         --len) {
-        // Drop one more character (and any UTF-8 continuation bytes).
-        size_t cut = len - 1;
-        while (cut > 0 && (text[cut] & 0xc0) == 0x80) --cut;
-        len = cut + 1;
-        strcpy(&text[cut], "..");
+    // Too wide: Drop characters (whole UTF-8 sequences) and append "..",
+    // until it fits. `full` keeps the original; `text` holds the attempt.
+    char full[sizeof(text)];
+    memcpy(full, text, sizeof(full));
+    for (size_t n = strlen(full); extents.x_advance > max_width && 0 < n; ) {
+        do { --n; } while (0 < n && (full[n] & 0xc0) == 0x80);
+        snprintf(text, sizeof(text), "%.*s..", (int)n, full);
         cairo_text_extents(cairo_ptr, text, &extents);
     }
 

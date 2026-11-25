@@ -509,12 +509,17 @@ void _wlmim_cursor_process_motion(
         cursor_ptr->wlr_cursor_ptr);
 
     // TODO(kaeser@gubbe.ch): also make this an event-based callback.
-    wlmtk_root_pointer_motion(
-        cursor_ptr->root_ptr,
-        cursor_ptr->wlr_cursor_ptr->x,
-        cursor_ptr->wlr_cursor_ptr->y,
-        time_msec,
-        cursor_ptr->pointer_ptr);
+    if (!wlmtk_root_pointer_motion(
+            cursor_ptr->root_ptr,
+            cursor_ptr->wlr_cursor_ptr->x,
+            cursor_ptr->wlr_cursor_ptr->y,
+            time_msec,
+            cursor_ptr->pointer_ptr)) {
+        // Over nothing that claims the pointer: Show the default image, not
+        // what the last client set (which may have hidden the pointer).
+        wlmtk_pointer_set_cursor(cursor_ptr->pointer_ptr,
+                                 WLMTK_POINTER_CURSOR_DEFAULT);
+    }
 }
 
 /* ------------------------------------------------------------------------- */

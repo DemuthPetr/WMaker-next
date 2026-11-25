@@ -399,11 +399,13 @@ void _wlmaker_task_list_draw_into_cairo(
         2 * _wlmaker_task_list_margin;
     cairo_text_extents_t extents;
     cairo_text_extents(cairo_ptr, title, &extents);
-    for (size_t len = strlen(title); extents.x_advance > width && len > 4; ) {
-        size_t cut = len - 1;
-        while (cut > 0 && (title[cut] & 0xc0) == 0x80) --cut;
-        len = cut + 2;
-        strcpy(&title[cut], "..");
+    // Too wide: Drop characters (whole UTF-8 sequences) and append "..",
+    // until it fits. `full` keeps the original; `title` holds the attempt.
+    char full[sizeof(title)];
+    memcpy(full, title, sizeof(full));
+    for (size_t n = strlen(full); extents.x_advance > width && 0 < n; ) {
+        do { --n; } while (0 < n && (full[n] & 0xc0) == 0x80);
+        snprintf(title, sizeof(title), "%.*s..", (int)n, full);
         cairo_text_extents(cairo_ptr, title, &extents);
     }
     cairo_move_to(
