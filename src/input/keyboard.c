@@ -112,64 +112,18 @@ wlmim_keyboard_t *wlmim_keyboard_create(
     keyboard_ptr->wlr_seat_ptr = wlr_seat_ptr;
     keyboard_ptr->root_element_ptr = root_element_ptr;
 
-    // Retrieve configuration.
-    bspl_dict_t *config_dict_ptr = bspl_dict_get_dict(
-        wlmaker_config_dict_ptr, "Keyboard");
-    if (NULL == config_dict_ptr) {
-        bs_log(BS_ERROR, "Failed to retrieve \"Keyboard\" dict from config.");
+    if (!wlmim_keyboard_reconfigure(keyboard_ptr, wlmaker_config_dict_ptr)) {
         wlmim_keyboard_destroy(keyboard_ptr);
         return NULL;
     }
-    keyboard_ptr->config_dict_ptr = BS_ASSERT_NOTNULL(
-        bspl_dict_ref(config_dict_ptr));
-
-    struct xkb_rule_names xkb_rule;
-    bspl_dict_t *rmlvo_dict_ptr = _wlmim_keyboard_populate_rules(
-        keyboard_ptr->config_dict_ptr, &xkb_rule);
-    if (NULL == rmlvo_dict_ptr) {
-        bs_log(BS_ERROR, "No rule data found in 'Keyboard' dict.");
-        wlmim_keyboard_destroy(keyboard_ptr);
-        return NULL;
-    }
-
-    // Set keyboard layout.
-    struct xkb_context *xkb_context_ptr = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
-    struct xkb_keymap *xkb_keymap_ptr = xkb_keymap_new_from_names(
-        xkb_context_ptr, &xkb_rule, XKB_KEYMAP_COMPILE_NO_FLAGS);
-    if (NULL == xkb_keymap_ptr) {
-        bs_log(BS_ERROR, "Failed xkb_keymap_new_from_names(%p, { .rules = %s, "
-               ".model = %s, .layout = %s, variant = %s, .options = %s }, "
-               "XKB_KEYMAP_COMPILE_NO_NO_FLAGS)",
-               xkb_context_ptr,
-               xkb_rule.rules,
-               xkb_rule.model,
-               xkb_rule.layout,
-               xkb_rule.variant,
-               xkb_rule.options);
-        bspl_dict_unref(rmlvo_dict_ptr);
-        wlmim_keyboard_destroy(keyboard_ptr);
-        return NULL;
-    }
-    bspl_dict_unref(rmlvo_dict_ptr);
-    wlr_keyboard_set_keymap(keyboard_ptr->wlr_keyboard_ptr, xkb_keymap_ptr);
-    xkb_keymap_unref(xkb_keymap_ptr);
     // Key bindings like "Logo+1" are written for the US layout. Keep that
     // keymap, to look up the US keysym when the configured one has no match.
+    struct xkb_context *xkb_context_ptr = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
     struct xkb_rule_names us_rule = {
         .rules = "evdev", .model = "pc105", .layout = "us" };
     keyboard_ptr->us_xkb_keymap_ptr = xkb_keymap_new_from_names(
         xkb_context_ptr, &us_rule, XKB_KEYMAP_COMPILE_NO_FLAGS);
     xkb_context_unref(xkb_context_ptr);
-
-    // Repeat rate and delay.
-    int32_t rate, delay;
-    if (!_wlmim_keyboard_populate_repeat(
-            keyboard_ptr->config_dict_ptr, &rate, &delay)) {
-        bs_log(BS_ERROR, "No repeat data found in 'Keyboard' dict.");
-        wlmim_keyboard_destroy(keyboard_ptr);
-        return NULL;
-    }
-    wlr_keyboard_set_repeat_info(keyboard_ptr->wlr_keyboard_ptr, rate, delay);
 
     wlmtk_util_connect_listener_signal(
         &keyboard_ptr->wlr_keyboard_ptr->events.key,
@@ -207,6 +161,66 @@ wlmim_keyboard_t *wlmim_keyboard_create(
 
     wlr_seat_set_keyboard(wlr_seat_ptr, keyboard_ptr->wlr_keyboard_ptr);
     return keyboard_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmim_keyboard_reconfigure(
+    wlmim_keyboard_t *keyboard_ptr,
+    bspl_dict_t *wlmaker_config_dict_ptr)
+{
+    // Retrieve configuration.
+    bspl_dict_t *config_dict_ptr = bspl_dict_get_dict(
+        wlmaker_config_dict_ptr, "Keyboard");
+    if (NULL == config_dict_ptr) {
+        bs_log(BS_ERROR, "Failed to retrieve \"Keyboard\" dict from config.");
+        return false;
+    }
+
+    struct xkb_rule_names xkb_rule;
+    bspl_dict_t *rmlvo_dict_ptr = _wlmim_keyboard_populate_rules(
+        config_dict_ptr, &xkb_rule);
+    if (NULL == rmlvo_dict_ptr) {
+        bs_log(BS_ERROR, "No rule data found in 'Keyboard' dict.");
+        return false;
+    }
+
+    // Set keyboard layout.
+    struct xkb_context *xkb_context_ptr = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    struct xkb_keymap *xkb_keymap_ptr = xkb_keymap_new_from_names(
+        xkb_context_ptr, &xkb_rule, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    if (NULL == xkb_keymap_ptr) {
+        bs_log(BS_ERROR, "Failed xkb_keymap_new_from_names(%p, { .rules = %s, "
+               ".model = %s, .layout = %s, variant = %s, .options = %s }, "
+               "XKB_KEYMAP_COMPILE_NO_NO_FLAGS)",
+               xkb_context_ptr,
+               xkb_rule.rules,
+               xkb_rule.model,
+               xkb_rule.layout,
+               xkb_rule.variant,
+               xkb_rule.options);
+        bspl_dict_unref(rmlvo_dict_ptr);
+        xkb_context_unref(xkb_context_ptr);
+        return false;
+    }
+    bspl_dict_unref(rmlvo_dict_ptr);
+    wlr_keyboard_set_keymap(keyboard_ptr->wlr_keyboard_ptr, xkb_keymap_ptr);
+    xkb_keymap_unref(xkb_keymap_ptr);
+    xkb_context_unref(xkb_context_ptr);
+
+    // Repeat rate and delay.
+    int32_t rate, delay;
+    if (!_wlmim_keyboard_populate_repeat(config_dict_ptr, &rate, &delay)) {
+        bs_log(BS_ERROR, "No repeat data found in 'Keyboard' dict.");
+        return false;
+    }
+    wlr_keyboard_set_repeat_info(keyboard_ptr->wlr_keyboard_ptr, rate, delay);
+
+    // Swap in the new section: Key bindings & the ini handler read it.
+    bspl_dict_t *old_dict_ptr = keyboard_ptr->config_dict_ptr;
+    keyboard_ptr->config_dict_ptr = BS_ASSERT_NOTNULL(
+        bspl_dict_ref(config_dict_ptr));
+    if (NULL != old_dict_ptr) bspl_dict_unref(old_dict_ptr);
+    return true;
 }
 
 /* ------------------------------------------------------------------------- */

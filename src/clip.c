@@ -345,6 +345,12 @@ bool wlmaker_clip_set_state(
 }
 
 /* ------------------------------------------------------------------------- */
+void wlmaker_clip_refresh(wlmaker_clip_t *clip_ptr)
+{
+    _wlmaker_clip_apply_style(clip_ptr, clip_ptr->server_ptr->style_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
 void wlmaker_clip_destroy(wlmaker_clip_t *clip_ptr)
 {
     if (NULL != clip_ptr->server_ptr) {

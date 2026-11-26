@@ -90,6 +90,18 @@ void wlmtk_workspace_set_details(
     int index);
 
 /**
+ * Renames the workspace.
+ *
+ * @param workspace_ptr
+ * @param name_ptr
+ *
+ * @return true on success.
+ */
+bool wlmtk_workspace_set_name(
+    wlmtk_workspace_t *workspace_ptr,
+    const char *name_ptr);
+
+/**
  * Retrieves the naming details of this workspace.
  *
  * @param workspace_ptr

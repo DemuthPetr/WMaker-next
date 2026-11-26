@@ -435,6 +435,12 @@ wlmtk_workspace_t *wlmtk_root_get_current_workspace(wlmtk_root_t *root_ptr)
 }
 
 /* ------------------------------------------------------------------------- */
+bs_dllist_t *wlmtk_root_get_workspaces(wlmtk_root_t *root_ptr)
+{
+    return &root_ptr->workspaces;
+}
+
+/* ------------------------------------------------------------------------- */
 void wlmtk_root_destroy_last_workspace(wlmtk_root_t *root_ptr)
 {
     wlmtk_workspace_t *ws_ptr = wlmtk_workspace_from_dlnode(

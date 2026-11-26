@@ -178,6 +178,9 @@ void wlmtk_root_remove_workspace(
  */
 wlmtk_workspace_t *wlmtk_root_get_current_workspace(wlmtk_root_t *root_ptr);
 
+/** @return The list of workspaces, see @ref wlmtk_workspace_from_dlnode. */
+bs_dllist_t *wlmtk_root_get_workspaces(wlmtk_root_t *root_ptr);
+
 /**
  * Destroys the last workspace -- if it's not the only remaining workspace, not
  * the current workspace, and if there's no windows contained in it.

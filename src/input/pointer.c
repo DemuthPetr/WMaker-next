@@ -106,6 +106,38 @@ const bspl_desc_t wlmim_pointer_config_touchpad[] = {
         touchpad.natural_scrolling,
         touchpad.natural_scrolling,
         true),
+    BSPL_DESC_DOUBLE(
+        "AccelSpeed",
+        false,
+        struct wlmim_pointer_options,
+        touchpad.accel_speed,
+        touchpad.accel_speed,
+        0.0),
+    BSPL_DESC_SENTINEL()
+};
+
+const bspl_desc_t wlmim_pointer_config_mouse[] = {
+    BSPL_DESC_DOUBLE(
+        "AccelSpeed",
+        false,
+        struct wlmim_pointer_options,
+        mouse.accel_speed,
+        mouse.accel_speed,
+        0.0),
+    BSPL_DESC_BOOL(
+        "LeftHanded",
+        false,
+        struct wlmim_pointer_options,
+        mouse.left_handed,
+        mouse.left_handed,
+        false),
+    BSPL_DESC_BOOL(
+        "NaturalScrolling",
+        false,
+        struct wlmim_pointer_options,
+        mouse.natural_scrolling,
+        mouse.natural_scrolling,
+        false),
     BSPL_DESC_SENTINEL()
 };
 
@@ -142,6 +174,29 @@ bool wlmim_pointer_enabled(wlmim_pointer_t *pointer_ptr)
     return pointer_ptr->enabled;
 }
 
+/* ------------------------------------------------------------------------- */
+void wlmim_pointer_reconfigure(
+    wlmim_pointer_t *pointer_ptr,
+    const struct wlmim_pointer_options *options_ptr)
+{
+    _wlmim_pointer_apply(pointer_ptr, options_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+/** Sets the pointer speed, if the device supports it. */
+static void _wlmim_pointer_set_accel(
+    struct libinput_device *lid_ptr,
+    double speed)
+{
+    if (!libinput_device_config_accel_is_available(lid_ptr)) return;
+    speed = BS_MIN(BS_MAX(speed, -1.0), 1.0);
+    if (LIBINPUT_CONFIG_STATUS_SUCCESS !=
+        libinput_device_config_accel_set_speed(lid_ptr, speed)) {
+        bs_log(BS_WARNING, "Failed libinput_device_config_accel_set_speed"
+               "(%p, %.2f)", lid_ptr, speed);
+    }
+}
+
 /* == Local (static) methods =============================================== */
 
 /* ------------------------------------------------------------------------- */
@@ -163,8 +218,20 @@ void _wlmim_pointer_apply(
     if (!wlr_input_device_is_libinput(p->wlr_input_device_ptr)) return;
     lid_ptr = wlr_libinput_get_device_handle(p->wlr_input_device_ptr);
 
-    // Guard clause: Ignore non-touchpad pointers.
-    if (0 >= libinput_device_config_tap_get_finger_count(lid_ptr)) return;
+    // Mice (non-touchpads): Speed, handedness, scroll direction.
+    if (0 >= libinput_device_config_tap_get_finger_count(lid_ptr)) {
+        _wlmim_pointer_set_accel(lid_ptr, options_ptr->mouse.accel_speed);
+        if (libinput_device_config_left_handed_is_available(lid_ptr)) {
+            libinput_device_config_left_handed_set(
+                lid_ptr, options_ptr->mouse.left_handed);
+        }
+        if (libinput_device_config_scroll_has_natural_scroll(lid_ptr)) {
+            libinput_device_config_scroll_set_natural_scroll_enabled(
+                lid_ptr, options_ptr->mouse.natural_scrolling);
+        }
+        return;
+    }
+    _wlmim_pointer_set_accel(lid_ptr, options_ptr->touchpad.accel_speed);
 
     // (only) touchpads can be disabled.
     p->enabled = options_ptr->touchpad.enabled;

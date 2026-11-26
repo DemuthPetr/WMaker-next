@@ -148,8 +148,33 @@ static const bspl_desc_t _wlmim_manager_config[] = {
     BSPL_DESC_DICT("Touchpad", false,
                    wlmim_t, pointer_options, pointer_options,
                    wlmim_pointer_config_touchpad),
+    BSPL_DESC_DICT("Mouse", false,
+                   wlmim_t, pointer_options, pointer_options,
+                   wlmim_pointer_config_mouse),
     BSPL_DESC_DICT("Cursor", false,
                    wlmim_t, cursor_options, cursor_options,
+                   wlmim_cursor_options_desc),
+    BSPL_DESC_SENTINEL()
+};
+
+/** The options @ref wlmim_reconfigure decodes, apart from the manager. */
+typedef struct {
+    /** As @ref wlmim_t::pointer_options. */
+    struct wlmim_pointer_options pointer_options;
+    /** As @ref wlmim_t::cursor_options. */
+    struct wlmim_cursor_options cursor_options;
+} _wlmim_options_t;
+
+/** Same as @ref _wlmim_manager_config, into @ref _wlmim_options_t. */
+static const bspl_desc_t _wlmim_options_config[] = {
+    BSPL_DESC_DICT("Touchpad", false,
+                   _wlmim_options_t, pointer_options, pointer_options,
+                   wlmim_pointer_config_touchpad),
+    BSPL_DESC_DICT("Mouse", false,
+                   _wlmim_options_t, pointer_options, pointer_options,
+                   wlmim_pointer_config_mouse),
+    BSPL_DESC_DICT("Cursor", false,
+                   _wlmim_options_t, cursor_options, cursor_options,
                    wlmim_cursor_options_desc),
     BSPL_DESC_SENTINEL()
 };
@@ -227,6 +252,66 @@ void wlmim_input_manager_destroy(wlmim_t *input_manager_ptr)
 
     bspl_dict_unref(input_manager_ptr->config_dict_ptr);
     free(input_manager_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmim_reconfigure(
+    wlmim_t *input_manager_ptr,
+    bspl_dict_t *config_dict_ptr,
+    bool keyboards)
+{
+    _wlmim_options_t options = {};
+    if (!bspl_decode_dict(config_dict_ptr, _wlmim_options_config, &options)) {
+        bs_log(BS_WARNING, "Invalid Touchpad, Mouse or Cursor configuration.");
+        return false;
+    }
+    input_manager_ptr->pointer_options = options.pointer_options;
+    input_manager_ptr->cursor_options = options.cursor_options;
+    if (NULL != input_manager_ptr->cursor_ptr) {
+        wlmim_cursor_set_options(input_manager_ptr->cursor_ptr,
+                                 &input_manager_ptr->cursor_options);
+    }
+    bspl_dict_t *old_dict_ptr = input_manager_ptr->config_dict_ptr;
+    input_manager_ptr->config_dict_ptr = BS_ASSERT_NOTNULL(
+        bspl_dict_ref(config_dict_ptr));
+    bspl_dict_unref(old_dict_ptr);
+
+    for (bs_dllist_node_t *dlnode_ptr = input_manager_ptr->devices.head_ptr;
+         NULL != dlnode_ptr;
+         dlnode_ptr = dlnode_ptr->next_ptr) {
+        struct wlmim_device *device_ptr = BS_CONTAINER_OF(
+            dlnode_ptr, struct wlmim_device, dlnode);
+        switch (device_ptr->wlr_input_device_ptr->type) {
+        case WLR_INPUT_DEVICE_KEYBOARD:
+            if (keyboards) {
+                wlmim_keyboard_reconfigure(device_ptr->handle_ptr,
+                                           config_dict_ptr);
+            }
+            break;
+        case WLR_INPUT_DEVICE_POINTER: {
+            bool was_enabled = wlmim_pointer_enabled(device_ptr->handle_ptr);
+            wlmim_pointer_reconfigure(device_ptr->handle_ptr,
+                                      &input_manager_ptr->pointer_options);
+            bool enabled = wlmim_pointer_enabled(device_ptr->handle_ptr);
+            if (NULL == input_manager_ptr->cursor_ptr ||
+                was_enabled == enabled) break;
+            // A touchpad turned on or off.
+            if (enabled) {
+                wlmim_cursor_attach_input_device(
+                    input_manager_ptr->cursor_ptr,
+                    device_ptr->wlr_input_device_ptr);
+            } else {
+                wlmim_cursor_detach_input_device(
+                    input_manager_ptr->cursor_ptr,
+                    device_ptr->wlr_input_device_ptr);
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    return true;
 }
 
 /* ------------------------------------------------------------------------- */

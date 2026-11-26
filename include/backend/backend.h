@@ -109,6 +109,18 @@ void wlmbe_backend_reduce(wlmbe_backend_t *backend_ptr);
 /** Saves the output's ephemeral state into the state file. */
 bool wlmbe_backend_save_ephemeral_output_configs(wlmbe_backend_t *backend_ptr);
 
+/**
+ * Re-reads the configuration's `Outputs`, and applies them to the outputs.
+ *
+ * @param backend_ptr
+ * @param config_dict_ptr     The full configuration dict.
+ *
+ * @return true on success; the previous configuration stays otherwise.
+ */
+bool wlmbe_backend_reconfigure(
+    wlmbe_backend_t *backend_ptr,
+    bspl_dict_t *config_dict_ptr);
+
 /** Unit test cases. */
 extern const bs_test_set_t wlmbe_backend_test_set;
 

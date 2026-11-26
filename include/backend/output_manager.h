@@ -21,6 +21,8 @@
 #ifndef __WLMBE_OUTPUT_MANAGER_H__
 #define __WLMBE_OUTPUT_MANAGER_H__
 
+#include <libbase/libbase.h>
+
 struct wl_display;
 struct wlr_backend;
 struct wlr_output_layout;
@@ -70,6 +72,18 @@ void wlmbe_output_manager_destroy(
 void wlmbe_output_manager_scale(
     wlmbe_output_manager_t *output_manager_ptr,
     double scale);
+
+/**
+ * Applies the configured attributes (scale, transformation, enabled,
+ * position, mode) of matching entries in `output_configs` to the outputs.
+ *
+ * @param output_manager_ptr
+ * @param output_configs_ptr  List of @ref wlmbe_output_config_t, as read
+ *                            from the configuration's `Outputs`.
+ */
+void wlmbe_output_manager_apply_configs(
+    wlmbe_output_manager_t *output_manager_ptr,
+    bs_dllist_t *output_configs_ptr);
 
 #ifdef __cplusplus
 }  // extern "C"

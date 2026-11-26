@@ -190,6 +190,19 @@ void wlmaker_idle_monitor_destroy(wlmaker_idle_monitor_t *idle_monitor_ptr)
 }
 
 /* ------------------------------------------------------------------------- */
+void wlmaker_idle_monitor_reconfigure(
+    wlmaker_idle_monitor_t *idle_monitor_ptr,
+    bspl_dict_t *lock_config_dict_ptr)
+{
+    if (NULL == lock_config_dict_ptr) return;
+    bspl_dict_t *old_dict_ptr = idle_monitor_ptr->lock_config_dict_ptr;
+    idle_monitor_ptr->lock_config_dict_ptr = bspl_dict_ref(
+        lock_config_dict_ptr);
+    if (NULL != old_dict_ptr) bspl_dict_unref(old_dict_ptr);
+    wlmaker_idle_monitor_reset(idle_monitor_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
 void wlmaker_idle_monitor_reset(wlmaker_idle_monitor_t *idle_monitor_ptr)
 {
     if (idle_monitor_ptr->locked) return;

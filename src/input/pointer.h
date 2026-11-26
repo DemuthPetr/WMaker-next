@@ -48,7 +48,18 @@ struct wlmim_pointer_options {
         enum libinput_config_scroll_method scroll_method;
         /** Natural scrolling, where the content is "moved" by touchpad. */
         bool                  natural_scrolling;
+        /** Pointer speed, -1 (slow) .. 1 (fast); 0 is libinput's default. */
+        double                accel_speed;
     } touchpad;
+    /** Configuration for other pointers (mice, trackballs). */
+    struct {
+        /** Pointer speed, -1 (slow) .. 1 (fast); 0 is libinput's default. */
+        double                accel_speed;
+        /** Swaps the left and right buttons. */
+        bool                  left_handed;
+        /** Natural scrolling, as for touchpads. */
+        bool                  natural_scrolling;
+    } mouse;
 };
 
 /** Forward declaration: Pointer handle. */
@@ -75,6 +86,20 @@ void wlmim_pointer_destroy(wlmim_pointer_t *pointer_ptr);
 
 /** @return @ref wlmim_pointer_t::enabled. */
 bool wlmim_pointer_enabled(wlmim_pointer_t *pointer_ptr);
+
+/**
+ * Applies (changed) options to the pointer. Enabling or disabling a
+ * touchpad is up to the caller, see @ref wlmim_pointer_enabled.
+ *
+ * @param pointer_ptr
+ * @param options_ptr
+ */
+void wlmim_pointer_reconfigure(
+    wlmim_pointer_t *pointer_ptr,
+    const struct wlmim_pointer_options *options_ptr);
+
+/** Plist descriptor for the "Mouse" section. */
+extern const bspl_desc_t wlmim_pointer_config_mouse[];
 
 /** Plist descriptor for the "Touchpad" section. */
 extern const bspl_desc_t wlmim_pointer_config_touchpad[];

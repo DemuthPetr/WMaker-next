@@ -67,6 +67,13 @@ bool wlmaker_clip_set_state(
     bspl_dict_t *state_dict_ptr);
 
 /**
+ * Redraws the clip: Eg. after the current workspace was renamed.
+ *
+ * @param clip_ptr
+ */
+void wlmaker_clip_refresh(wlmaker_clip_t *clip_ptr);
+
+/**
  * Destroys the Clip.
  *
  * @param clip_ptr

@@ -403,6 +403,24 @@ void wlmbe_backend_reduce(wlmbe_backend_t *backend_ptr)
 }
 
 /* ------------------------------------------------------------------------- */
+bool wlmbe_backend_reconfigure(
+    wlmbe_backend_t *backend_ptr,
+    bspl_dict_t *config_dict_ptr)
+{
+    wlmbe_backend_t decoded = {};
+    if (!bspl_decode_dict(config_dict_ptr, _wlmbe_output_configs_desc,
+                          &decoded)) {
+        bs_log(BS_WARNING, "Invalid 'Outputs' configuration, keeping it.");
+        return false;
+    }
+    bspl_decoded_destroy(_wlmbe_output_configs_desc, backend_ptr);
+    backend_ptr->output_configs = decoded.output_configs;
+    wlmbe_output_manager_apply_configs(
+        backend_ptr->output_manager_ptr, &backend_ptr->output_configs);
+    return true;
+}
+
+/* ------------------------------------------------------------------------- */
 bool wlmbe_backend_save_ephemeral_output_configs(wlmbe_backend_t *backend_ptr)
 {
     bspl_dict_t *dict_ptr = bspl_encode_dict(

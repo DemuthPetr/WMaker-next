@@ -60,6 +60,19 @@ wlmim_keyboard_t *wlmim_keyboard_create(
  */
 void wlmim_keyboard_destroy(wlmim_keyboard_t *keyboard_ptr);
 
+/**
+ * (Re)applies the "Keyboard" section of the configuration: Layout (XKB
+ * rules, model, layout, variant, options) and repeat delay & rate.
+ *
+ * @param keyboard_ptr
+ * @param wlmaker_config_dict_ptr  The full configuration dict.
+ *
+ * @return true on success; on failure the keyboard is left as it was.
+ */
+bool wlmim_keyboard_reconfigure(
+    wlmim_keyboard_t *keyboard_ptr,
+    bspl_dict_t *wlmaker_config_dict_ptr);
+
 /** Keyboard modifiers, as enum to lookup. */
 extern const bspl_enum_desc_t wlmim_keyboard_modifiers[];
 

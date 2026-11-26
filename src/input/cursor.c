@@ -289,6 +289,14 @@ wlmim_cursor_t *wlmim_cursor_create(
 }
 
 /* ------------------------------------------------------------------------- */
+void wlmim_cursor_set_options(
+    wlmim_cursor_t *cursor_ptr,
+    const struct wlmim_cursor_options *options_ptr)
+{
+    cursor_ptr->options = *options_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
 void wlmim_cursor_destroy(wlmim_cursor_t *cursor_ptr)
 {
     wlmtk_util_disconnect_listener(

@@ -57,6 +57,17 @@ void wlmaker_idle_monitor_destroy(wlmaker_idle_monitor_t *idle_monitor_ptr);
 void wlmaker_idle_monitor_reset(wlmaker_idle_monitor_t *idle_monitor_ptr);
 
 /**
+ * Applies a new "ScreenLock" configuration (IdleSeconds, Command), and
+ * restarts the idle timer with it.
+ *
+ * @param idle_monitor_ptr
+ * @param lock_config_dict_ptr
+ */
+void wlmaker_idle_monitor_reconfigure(
+    wlmaker_idle_monitor_t *idle_monitor_ptr,
+    bspl_dict_t *lock_config_dict_ptr);
+
+/**
  * Executes the configured 'Command' for locking. Overrides inhibits.
  *
  * @param idle_monitor_ptr

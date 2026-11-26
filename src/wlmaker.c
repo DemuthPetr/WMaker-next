@@ -332,6 +332,79 @@ static const char *_wlmaker_theme_file(bspl_dict_t *config_dict_ptr)
 }
 
 /* ------------------------------------------------------------------------- */
+/** @return whether the dicts' `key` entries are the same (or both absent). */
+static bool _wlmaker_same_entry(
+    bspl_dict_t *a_ptr,
+    bspl_dict_t *b_ptr,
+    const char *key_ptr)
+{
+    bspl_object_t *a = bspl_dict_get(a_ptr, key_ptr);
+    bspl_object_t *b = bspl_dict_get(b_ptr, key_ptr);
+    if (NULL == a || NULL == b) return a == b;
+    bs_dynbuf_t da = {}, db = {};
+    bool same = false;
+    if (bs_dynbuf_init(&da, 1024, SIZE_MAX) &&
+        bs_dynbuf_init(&db, 1024, SIZE_MAX) &&
+        bspl_object_write(a, &da) && bspl_object_write(b, &db)) {
+        same = da.length == db.length &&
+            0 == memcmp(da.data_ptr, db.data_ptr, da.length);
+    }
+    bs_dynbuf_fini(&da);
+    bs_dynbuf_fini(&db);
+    return same;
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Applies the server's sections of a re-read configuration, each only if it
+ * changed: Input (Keyboard, Touchpad, Mouse, Cursor), HotCorner, ScreenLock
+ * and Outputs. Re-applying unchanged ones would reset eg. the keyboard
+ * layout group, or flicker the outputs.
+ */
+static void _wlmaker_reload_server_config(
+    wlmaker_server_t *server_ptr,
+    bspl_dict_t *config_dict_ptr)
+{
+    bspl_dict_t *old_ptr = server_ptr->config_dict_ptr;
+
+    bool keyboard_changed = !_wlmaker_same_entry(
+        old_ptr, config_dict_ptr, "Keyboard");
+    if (keyboard_changed ||
+        !_wlmaker_same_entry(old_ptr, config_dict_ptr, "Touchpad") ||
+        !_wlmaker_same_entry(old_ptr, config_dict_ptr, "Mouse") ||
+        !_wlmaker_same_entry(old_ptr, config_dict_ptr, "Cursor")) {
+        wlmim_reconfigure(server_ptr->input_manager_ptr, config_dict_ptr,
+                          keyboard_changed);
+    }
+    if (!_wlmaker_same_entry(old_ptr, config_dict_ptr, "HotCorner")) {
+        wlmaker_corner_t *corner_ptr = wlmaker_corner_create(
+            bspl_dict_get_dict(config_dict_ptr, "HotCorner"),
+            wl_display_get_event_loop(server_ptr->wl_display_ptr),
+            server_ptr->wlr_output_layout_ptr,
+            wlmim_wlr_cursor(server_ptr->input_manager_ptr),
+            &wlmim_events(server_ptr->input_manager_ptr)->cursor_position_updated,
+            server_ptr);
+        if (NULL != corner_ptr) {
+            wlmaker_corner_destroy(server_ptr->corner_ptr);
+            server_ptr->corner_ptr = corner_ptr;
+        } else {
+            bs_log(BS_WARNING, "Invalid 'HotCorner' configuration, keeping it.");
+        }
+    }
+    if (!_wlmaker_same_entry(old_ptr, config_dict_ptr, "ScreenLock")) {
+        wlmaker_idle_monitor_reconfigure(
+            server_ptr->idle_monitor_ptr,
+            bspl_dict_get_dict(config_dict_ptr, "ScreenLock"));
+    }
+    if (!_wlmaker_same_entry(old_ptr, config_dict_ptr, "Outputs")) {
+        wlmbe_backend_reconfigure(server_ptr->backend_ptr, config_dict_ptr);
+    }
+
+    server_ptr->config_dict_ptr = bspl_dict_ref(config_dict_ptr);
+    bspl_dict_unref(old_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
 /** Re-reads the configuration: Theme, effects, key bindings, root menu. */
 static void _wlmaker_reload_config(wlmaker_server_t *server_ptr)
 {
@@ -341,6 +414,8 @@ static void _wlmaker_reload_config(wlmaker_server_t *server_ptr)
         bs_log(BS_WARNING, "Failed to reload configuration, keeping it.");
         return;
     }
+
+    _wlmaker_reload_server_config(server_ptr, config_dict_ptr);
 
     const char *theme_file_ptr = _wlmaker_theme_file(config_dict_ptr);
     bool theme_changed = (NULL == theme_file_ptr) !=
@@ -401,6 +476,10 @@ static void _wlmaker_reload_config(wlmaker_server_t *server_ptr)
     }
 }
 
+static void _wlmaker_reload_workspaces(
+    wlmaker_server_t *server_ptr,
+    bspl_dict_t *state_dict_ptr);
+
 /* ------------------------------------------------------------------------- */
 /** Re-reads the state: Re-creates the dock, moves the clip and icon area. */
 static void _wlmaker_reload_state(wlmaker_server_t *server_ptr)
@@ -426,6 +505,7 @@ static void _wlmaker_reload_state(wlmaker_server_t *server_ptr)
     if (NULL != wlmaker_icon_area_ptr) {
         wlmaker_icon_area_set_state(wlmaker_icon_area_ptr, state_dict_ptr);
     }
+    _wlmaker_reload_workspaces(server_ptr, state_dict_ptr);
 
     bspl_dict_unref(wlmaker_state_dict_ptr);
     wlmaker_state_dict_ptr = state_dict_ptr;
@@ -445,6 +525,38 @@ static int _wlmaker_handle_sighup(
     _wlmaker_reload_config(server_ptr);
     _wlmaker_reload_state(server_ptr);
     return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/** Adds a workspace with the given name & color (0: the theme's). */
+static bool _wlmaker_add_workspace(
+    wlmaker_server_t *server_ptr,
+    wlmaker_workspace_style_t *s_ptr)
+{
+    wlmtk_workspace_t *workspace_ptr = wlmtk_workspace_create(
+        server_ptr->wlr_output_layout_ptr,
+        s_ptr->name,
+        &server_ptr->style_ptr->tile);
+    if (NULL == workspace_ptr) {
+        bs_log(BS_ERROR, "Failed wlmtk_workspace_create(\"%s\")", s_ptr->name);
+        return false;
+    }
+
+    if (s_ptr->color == 0) {
+        s_ptr->color = server_ptr->style_ptr->background_color;
+    }
+    bs_dllist_node_t *bg_dlnode_ptr = wlmaker_background_create(
+        workspace_ptr,
+        server_ptr->wlr_output_layout_ptr,
+        s_ptr->color);
+    if (NULL == bg_dlnode_ptr) {
+        bs_log(BS_ERROR, "Failed wlmaker_background()");
+        wlmtk_workspace_destroy(workspace_ptr);
+        return false;
+    }
+    bs_dllist_push_back(&server_ptr->backgrounds, bg_dlnode_ptr);
+    wlmtk_root_add_workspace(server_ptr->root_ptr, workspace_ptr);
+    return true;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -476,33 +588,70 @@ bool create_workspaces(
             break;
         }
 
-        wlmtk_workspace_t *workspace_ptr = wlmtk_workspace_create(
-            server_ptr->wlr_output_layout_ptr,
-            s.name,
-            &server_ptr->style_ptr->tile);
-        if (NULL == workspace_ptr) {
-            bs_log(BS_ERROR, "Failed wlmtk_workspace_create(\"%s\")", s.name);
+        if (!_wlmaker_add_workspace(server_ptr, &s)) {
             rv = false;
             break;
         }
-
-        if (s.color == 0) {
-            s.color = server_ptr->style_ptr->background_color;
-        }
-        bs_dllist_node_t *bg_dlnode_ptr = wlmaker_background_create(
-            workspace_ptr,
-            server_ptr->wlr_output_layout_ptr,
-            s.color);
-        if (NULL == bg_dlnode_ptr) {
-            bs_log(BS_ERROR, "Failed wlmaker_background()");
-            rv = false;
-            break;
-        }
-        bs_dllist_push_back(&server_ptr->backgrounds, bg_dlnode_ptr);
-        wlmtk_root_add_workspace(server_ptr->root_ptr, workspace_ptr);
     }
 
     return rv;
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Applies the state's `Workspaces`: Renames and recolors the existing ones,
+ * adds missing ones, and removes surplus ones from the end -- unless one is
+ * the current workspace, or holds windows: Those stay.
+ */
+static void _wlmaker_reload_workspaces(
+    wlmaker_server_t *server_ptr,
+    bspl_dict_t *state_dict_ptr)
+{
+    bspl_array_t *array_ptr = bspl_dict_get_array(state_dict_ptr, "Workspaces");
+    if (NULL == array_ptr || 0 == bspl_array_size(array_ptr)) return;
+
+    bs_dllist_t *workspaces_ptr = wlmtk_root_get_workspaces(server_ptr->root_ptr);
+    bs_dllist_node_t *ws_dlnode_ptr = workspaces_ptr->head_ptr;
+    bs_dllist_node_t *bg_dlnode_ptr = server_ptr->backgrounds.head_ptr;
+    size_t n = bspl_array_size(array_ptr);
+    for (size_t i = 0; i < n; ++i) {
+        wlmaker_workspace_style_t s;
+        bspl_dict_t *dict_ptr = bspl_dict_from_object(bspl_array_at(array_ptr, i));
+        if (NULL == dict_ptr ||
+            !bspl_decode_dict(dict_ptr, wlmaker_workspace_style_desc, &s)) {
+            bs_log(BS_WARNING, "Invalid workspace %zu in state, skipping.", i);
+            if (NULL != ws_dlnode_ptr) ws_dlnode_ptr = ws_dlnode_ptr->next_ptr;
+            if (NULL != bg_dlnode_ptr) bg_dlnode_ptr = bg_dlnode_ptr->next_ptr;
+            continue;
+        }
+        if (NULL == ws_dlnode_ptr) {
+            _wlmaker_add_workspace(server_ptr, &s);
+            continue;
+        }
+        wlmtk_workspace_set_name(wlmtk_workspace_from_dlnode(ws_dlnode_ptr),
+                                 s.name);
+        if (0 == s.color) s.color = server_ptr->style_ptr->background_color;
+        if (NULL != bg_dlnode_ptr) {
+            wlmaker_background_dlnode_set_color(bg_dlnode_ptr, &s.color);
+            bg_dlnode_ptr = bg_dlnode_ptr->next_ptr;
+        }
+        ws_dlnode_ptr = ws_dlnode_ptr->next_ptr;
+    }
+
+    // Surplus workspaces: Remove from the end, as far as permitted.
+    while (bs_dllist_size(workspaces_ptr) > n) {
+        size_t before = bs_dllist_size(workspaces_ptr);
+        wlmtk_root_destroy_last_workspace(server_ptr->root_ptr);
+        if (bs_dllist_size(workspaces_ptr) == before) {
+            bs_log(BS_INFO, "Keeping workspace %zu: current, or has windows.",
+                   before);
+            break;
+        }
+        bs_dllist_node_t *bg_ptr = bs_dllist_pop_back(&server_ptr->backgrounds);
+        if (NULL != bg_ptr) wlmaker_background_dlnode_destroy(bg_ptr, NULL);
+    }
+
+    if (NULL != wlmaker_clip_ptr) wlmaker_clip_refresh(wlmaker_clip_ptr);
 }
 
 /* == Main program ========================================================= */

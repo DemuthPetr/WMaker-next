@@ -21,6 +21,8 @@
 
 #include "output_manager.h"
 
+#include "output_config.h"
+
 #include <libbase/libbase.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -221,6 +223,70 @@ void wlmbe_output_manager_scale(
     wlr_output_configuration_v1_destroy(wlr_output_configuration_v1_ptr);
 
     // Not to forget: Propagate to potential layout manager clients.
+    _wlmbe_output_manager_handle_output_layout_change(
+        &output_manager_ptr->output_layout_change_listener, NULL);
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmbe_output_manager_apply_configs(
+    wlmbe_output_manager_t *output_manager_ptr,
+    bs_dllist_t *output_configs_ptr)
+{
+    struct wlr_output_configuration_v1 *cfg_ptr =
+        wlr_output_configuration_v1_create();
+    if (NULL == cfg_ptr) {
+        bs_log(BS_ERROR, "Failed wlr_output_configuration_v1_create()");
+        return;
+    }
+
+    if (wlmtk_util_wl_list_for_each(
+            &output_manager_ptr->wlr_output_layout_ptr->outputs,
+            _wlmbe_output_manager_update_output_configuration,
+            cfg_ptr)) {
+        struct wlr_output_configuration_head_v1 *head_ptr;
+        wl_list_for_each(head_ptr, &cfg_ptr->heads, link) {
+            struct wlr_output *wlr_output_ptr = head_ptr->state.output;
+            wlmbe_output_config_t *config_ptr =
+                wlmbe_output_config_from_dlnode(bs_dllist_find(
+                        output_configs_ptr,
+                        wlmbe_output_config_fnmatches,
+                        wlr_output_ptr));
+            if (NULL == config_ptr) continue;
+            const wlmbe_output_config_attributes_t *attr_ptr =
+                wlmbe_output_config_attributes(config_ptr);
+            head_ptr->state.scale = attr_ptr->scale;
+            head_ptr->state.transform = attr_ptr->transformation;
+            head_ptr->state.enabled = attr_ptr->enabled;
+            if (attr_ptr->has_position) {
+                head_ptr->state.x = attr_ptr->position.x;
+                head_ptr->state.y = attr_ptr->position.y;
+            }
+            if (attr_ptr->has_mode) {
+                // A listed mode of that size (and rate, if given); else custom.
+                struct wlr_output_mode *mode_ptr, *found_ptr = NULL;
+                wl_list_for_each(mode_ptr, &wlr_output_ptr->modes, link) {
+                    if (mode_ptr->width != attr_ptr->mode.width ||
+                        mode_ptr->height != attr_ptr->mode.height) continue;
+                    if (0 == attr_ptr->mode.refresh ||
+                        mode_ptr->refresh == attr_ptr->mode.refresh) {
+                        if (NULL == found_ptr || mode_ptr->preferred) {
+                            found_ptr = mode_ptr;
+                        }
+                    }
+                }
+                head_ptr->state.mode = found_ptr;
+                if (NULL == found_ptr) {
+                    head_ptr->state.custom_mode.width = attr_ptr->mode.width;
+                    head_ptr->state.custom_mode.height = attr_ptr->mode.height;
+                    head_ptr->state.custom_mode.refresh = attr_ptr->mode.refresh;
+                }
+            }
+        }
+        _wlmbe_output_manager_apply(output_manager_ptr, cfg_ptr, true);
+    }
+    wlr_output_configuration_v1_destroy(cfg_ptr);
+
+    // Propagate to potential layout manager clients.
     _wlmbe_output_manager_handle_output_layout_change(
         &output_manager_ptr->output_layout_change_listener, NULL);
 }

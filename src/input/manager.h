@@ -133,6 +133,22 @@ wlmim_t *wlmim_input_manager_create(
  */
 void wlmim_input_manager_destroy(wlmim_t *input_manager_ptr);
 
+/**
+ * Applies a (re-read) configuration: Keyboard layout & repeat, Touchpad,
+ * Mouse and Cursor options, to the manager and all present devices.
+ *
+ * @param input_manager_ptr
+ * @param config_dict_ptr     The full configuration dict.
+ * @param keyboards           Whether to reconfigure keyboards, too. Setting
+ *                            the keymap resets the active layout group.
+ *
+ * @return true on success.
+ */
+bool wlmim_reconfigure(
+    wlmim_t *input_manager_ptr,
+    bspl_dict_t *config_dict_ptr,
+    bool keyboards);
+
 /** @return Pointer to wlmim_t::events. */
 struct wlmim_events *wlmim_events(wlmim_t *input_manager_ptr);
 

@@ -121,6 +121,16 @@ void wlmim_cursor_detach_input_device(
     wlmim_cursor_t *cursor_ptr,
     struct wlr_input_device *wlr_input_device_ptr);
 
+/**
+ * Updates the cursor options (eg. after a configuration reload).
+ *
+ * @param cursor_ptr
+ * @param options_ptr
+ */
+void wlmim_cursor_set_options(
+    wlmim_cursor_t *cursor_ptr,
+    const struct wlmim_cursor_options *options_ptr);
+
 /** Descriptor for decoding the "Cursor" style dictionary. */
 extern const bspl_desc_t wlmim_cursor_style_desc[];
 

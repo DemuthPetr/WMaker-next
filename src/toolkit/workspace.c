@@ -431,6 +431,18 @@ void wlmtk_workspace_set_details(
 }
 
 /* ------------------------------------------------------------------------- */
+bool wlmtk_workspace_set_name(
+    wlmtk_workspace_t *workspace_ptr,
+    const char *name_ptr)
+{
+    char *new_name_ptr = logged_strdup(name_ptr);
+    if (NULL == new_name_ptr) return false;
+    free(workspace_ptr->name_ptr);
+    workspace_ptr->name_ptr = new_name_ptr;
+    return true;
+}
+
+/* ------------------------------------------------------------------------- */
 void wlmtk_workspace_get_details(
     wlmtk_workspace_t *workspace_ptr,
     const char **name_ptr_ptr,
