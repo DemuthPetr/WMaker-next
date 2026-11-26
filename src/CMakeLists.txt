@@ -82,6 +82,7 @@ target_sources(wlmaker_lib PRIVATE
   foreign_toplevel.c
   icon_area.c
   icon_manager.c
+  popup_menu.c
   idle.c
   input_observation.c
   launcher.c

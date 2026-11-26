@@ -166,6 +166,7 @@ const bspl_enum_desc_t wlmaker_action_desc[] = {
     BSPL_ENUM("WindowClose", WLMAKER_ACTION_WINDOW_CLOSE),
     BSPL_ENUM("WindowKill", WLMAKER_ACTION_WINDOW_KILL),
     BSPL_ENUM("WindowAttributes", WLMAKER_ACTION_WINDOW_ATTRIBUTES),
+    BSPL_ENUM("WindowAddToDock", WLMAKER_ACTION_WINDOW_ADD_TO_DOCK),
     BSPL_ENUM("WindowTileLeft", WLMAKER_ACTION_WINDOW_TILE_LEFT),
     BSPL_ENUM("WindowTileRight", WLMAKER_ACTION_WINDOW_TILE_RIGHT),
     BSPL_ENUM("WindowTileTop", WLMAKER_ACTION_WINDOW_TILE_TOP),
@@ -305,6 +306,26 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
             server_ptr->monitor_ptr,
             bs_subprocess_create_cmdline(arg_ptr));
         break;
+
+    case WLMAKER_ACTION_WINDOW_ADD_TO_DOCK: {
+        // The settings tool finds the application's desktop entry, adds a
+        // launcher for it and reloads (Config.plist SettingsCommand).
+        workspace_ptr = wlmtk_root_get_current_workspace(server_ptr->root_ptr);
+        window_ptr = wlmtk_workspace_get_activated_window(workspace_ptr);
+        if (NULL == window_ptr) break;
+        const char *cmd_ptr = bspl_dict_get_string_value(
+            server_ptr->config_dict_ptr, "SettingsCommand");
+        const char *app_id_ptr = wlmtk_window_get_app_id(window_ptr);
+        if (NULL == app_id_ptr || 0 == *app_id_ptr) break;
+        argv = (const char*[]){
+            "/bin/sh", "-c", "exec \"$0\" --dock-add \"$1\"",
+            NULL != cmd_ptr ? cmd_ptr : "wmaker-next-settings",
+            app_id_ptr, NULL };
+        wlmaker_subprocess_monitor_run(
+            server_ptr->monitor_ptr,
+            bs_subprocess_create(argv[0], argv, NULL));
+        break;
+    }
 
     case WLMAKER_ACTION_WINDOW_ATTRIBUTES: {
         // Opens the attributes inspector (Config.plist AttributesCommand,

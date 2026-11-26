@@ -37,6 +37,7 @@
 
 #include "action.h"
 #include "server.h"
+#include "popup_menu.h"
 #include "toolkit/toolkit.h"
 
 /* == Declarations ========================================================= */
@@ -58,6 +59,16 @@ struct _wlmaker_launcher_t {
 
     /** Commandline to launch the associated application. */
     char                      *cmdline_ptr;
+    /** Optional commandline for a middle click (else as a left click). */
+    char                      *middle_cmdline_ptr;
+    /** Whether to launch it when the session starts. */
+    bool                      auto_launch;
+    /** Whether it is protected from removal. */
+    bool                      locked;
+    /** Called on a right click: The dock's menu for this launcher. */
+    void (*menu_fn)(void *ud_ptr, wlmaker_launcher_t *launcher_ptr);
+    /** Argument for `menu_fn`. */
+    void                      *menu_ud_ptr;
     /** Alternatively: A wlmaker action to execute, eg. "ShowDesktop". */
     char                      *action_ptr;
     /** Server, for executing `action_ptr`. */
@@ -103,11 +114,22 @@ static const bspl_desc_t _wlmaker_launcher_plist_desc[] = {
     BSPL_DESC_STRING(
         "Action", false, wlmaker_launcher_t, action_ptr, action_ptr, ""),
     BSPL_DESC_STRING(
+        "MiddleClick", false, wlmaker_launcher_t,
+        middle_cmdline_ptr, middle_cmdline_ptr, ""),
+    BSPL_DESC_BOOL(
+        "AutoLaunch", false, wlmaker_launcher_t, auto_launch, auto_launch,
+        false),
+    BSPL_DESC_BOOL(
+        "Lock", false, wlmaker_launcher_t, locked, locked, false),
+    BSPL_DESC_STRING(
         "Icon", true, wlmaker_launcher_t, icon_path_ptr, icon_path_ptr, ""),
     BSPL_DESC_SENTINEL(),
 };
 
 static void _wlmaker_launcher_update_overlay(wlmaker_launcher_t *launcher_ptr);
+static void _wlmaker_launcher_run(
+    wlmaker_launcher_t *launcher_ptr,
+    const char *cmdline_ptr);
 static struct wlr_buffer *_wlmaker_launcher_create_overlay_buffer(
     wlmaker_launcher_t *launcher_ptr);
 
@@ -273,6 +295,10 @@ wlmaker_launcher_t *wlmaker_launcher_create_from_plist(
 /* ------------------------------------------------------------------------- */
 void wlmaker_launcher_destroy(wlmaker_launcher_t *launcher_ptr)
 {
+    if (NULL != launcher_ptr->server_ptr) {
+        wlmaker_popup_menu_cancel(launcher_ptr->server_ptr->popup_menu_ptr,
+                                  launcher_ptr);
+    }
     if (NULL != launcher_ptr->drop_idle_ptr) {
         wl_event_source_remove(launcher_ptr->drop_idle_ptr);
         launcher_ptr->drop_idle_ptr = NULL;
@@ -322,6 +348,10 @@ void wlmaker_launcher_destroy(wlmaker_launcher_t *launcher_ptr)
         free(launcher_ptr->action_ptr);
         launcher_ptr->action_ptr = NULL;
     }
+    if (NULL != launcher_ptr->middle_cmdline_ptr) {
+        free(launcher_ptr->middle_cmdline_ptr);
+        launcher_ptr->middle_cmdline_ptr = NULL;
+    }
     if (NULL != launcher_ptr->dict_ptr) {
         bspl_dict_unref(launcher_ptr->dict_ptr);
         launcher_ptr->dict_ptr = NULL;
@@ -353,6 +383,110 @@ void wlmaker_launcher_set_drop_handler(
 {
     launcher_ptr->drop_fn = drop_fn;
     launcher_ptr->drop_ud_ptr = ud_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmaker_launcher_set_menu_handler(
+    wlmaker_launcher_t *launcher_ptr,
+    void (*menu_fn)(void *ud_ptr, wlmaker_launcher_t *launcher_ptr),
+    void *ud_ptr)
+{
+    launcher_ptr->menu_fn = menu_fn;
+    launcher_ptr->menu_ud_ptr = ud_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmaker_launcher_launch(wlmaker_launcher_t *launcher_ptr)
+{
+    _wlmaker_launcher_start(launcher_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmaker_launcher_is_running(wlmaker_launcher_t *launcher_ptr)
+{
+    return !bs_ptr_set_empty(launcher_ptr->mapped_windows_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmaker_launcher_has_command(wlmaker_launcher_t *launcher_ptr)
+{
+    return NULL != launcher_ptr->cmdline_ptr && 0 != *launcher_ptr->cmdline_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmaker_launcher_is_locked(wlmaker_launcher_t *launcher_ptr)
+{
+    return launcher_ptr->locked;
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmaker_launcher_auto_launches(wlmaker_launcher_t *launcher_ptr)
+{
+    return launcher_ptr->auto_launch;
+}
+
+/** Argument for @ref _wlmaker_launcher_hide_iterator. */
+typedef struct {
+    /** The launcher. */
+    wlmaker_launcher_t        *launcher_ptr;
+    /** Whether any of its windows is shown. */
+    bool                      any_shown;
+    /** 0: Find out; 1: Minimize; 2: Restore. */
+    int                       mode;
+} _wlmaker_launcher_hide_arg_t;
+
+/* ------------------------------------------------------------------------- */
+/** For each window of a workspace that the launcher started. */
+static void _wlmaker_launcher_hide_windows(bs_dllist_node_t *dlnode_ptr,
+                                           void *ud_ptr)
+{
+    _wlmaker_launcher_hide_arg_t *arg_ptr = ud_ptr;
+    wlmtk_workspace_t *workspace_ptr = wlmtk_workspace_from_dlnode(dlnode_ptr);
+    for (bs_dllist_node_t *wdl_ptr =
+             wlmtk_workspace_get_windows_dllist(workspace_ptr)->head_ptr;
+         NULL != wdl_ptr;) {
+        wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(wdl_ptr);
+        wdl_ptr = wdl_ptr->next_ptr;
+        if (!bs_ptr_set_contains(arg_ptr->launcher_ptr->mapped_windows_ptr,
+                                 window_ptr)) continue;
+        switch (arg_ptr->mode) {
+        case 0:
+            arg_ptr->any_shown |= !wlmtk_window_is_minimized(window_ptr);
+            break;
+        case 1:
+            if (!wlmtk_window_is_minimized(window_ptr)) {
+                wlmtk_window_request_minimize(window_ptr);
+            }
+            break;
+        default:
+            if (wlmtk_window_is_minimized(window_ptr)) {
+                wlmtk_workspace_restore_window(workspace_ptr, window_ptr);
+            }
+            break;
+        }
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmaker_launcher_toggle_hidden(wlmaker_launcher_t *launcher_ptr)
+{
+    if (NULL == launcher_ptr->server_ptr) return false;
+    _wlmaker_launcher_hide_arg_t arg = { .launcher_ptr = launcher_ptr };
+    wlmtk_root_t *root_ptr = launcher_ptr->server_ptr->root_ptr;
+    wlmtk_root_for_each_workspace(root_ptr, _wlmaker_launcher_hide_windows, &arg);
+    arg.mode = arg.any_shown ? 1 : 2;
+    wlmtk_root_for_each_workspace(root_ptr, _wlmaker_launcher_hide_windows, &arg);
+    return arg.any_shown;
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmaker_launcher_any_shown(wlmaker_launcher_t *launcher_ptr)
+{
+    if (NULL == launcher_ptr->server_ptr) return false;
+    _wlmaker_launcher_hide_arg_t arg = { .launcher_ptr = launcher_ptr };
+    wlmtk_root_for_each_workspace(launcher_ptr->server_ptr->root_ptr,
+                                  _wlmaker_launcher_hide_windows, &arg);
+    return arg.any_shown;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -458,6 +592,23 @@ bool _wlmaker_launcher_pointer_button(
         element_ptr, wlmaker_launcher_t,
         super_tile.super_container.super_element);
 
+    // Right click: The dock's menu. Middle click: The alternate command.
+    if (BTN_RIGHT == button_event_ptr->button &&
+        WLMTK_BUTTON_CLICK == button_event_ptr->type) {
+        if (NULL != launcher_ptr->menu_fn) {
+            launcher_ptr->menu_fn(launcher_ptr->menu_ud_ptr, launcher_ptr);
+        }
+        return true;
+    }
+    if (BTN_MIDDLE == button_event_ptr->button &&
+        WLMTK_BUTTON_CLICK == button_event_ptr->type) {
+        _wlmaker_launcher_run(
+            launcher_ptr,
+            (NULL != launcher_ptr->middle_cmdline_ptr &&
+             0 != *launcher_ptr->middle_cmdline_ptr) ?
+            launcher_ptr->middle_cmdline_ptr : NULL);
+        return true;
+    }
     if (BTN_LEFT != button_event_ptr->button) return true;
     wlmtk_element_t *e = wlmtk_tile_element(&launcher_ptr->super_tile);
 
@@ -563,7 +714,22 @@ void _wlmaker_launcher_pointer_grab_cancel(wlmtk_element_t *element_ptr)
  */
 void _wlmaker_launcher_start(wlmaker_launcher_t *launcher_ptr)
 {
-    if (NULL != launcher_ptr->action_ptr && 0 != *launcher_ptr->action_ptr) {
+    _wlmaker_launcher_run(launcher_ptr, NULL);
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Runs the launcher's action or command; or `cmdline_ptr`, if not NULL.
+ *
+ * @param launcher_ptr
+ * @param cmdline_ptr         Command to run instead. May be NULL.
+ */
+void _wlmaker_launcher_run(
+    wlmaker_launcher_t *launcher_ptr,
+    const char *cmdline_ptr)
+{
+    if (NULL == cmdline_ptr &&
+        NULL != launcher_ptr->action_ptr && 0 != *launcher_ptr->action_ptr) {
         for (const bspl_enum_desc_t *d = wlmaker_action_desc;
              NULL != d->name_ptr; ++d) {
             if (0 != strcmp(d->name_ptr, launcher_ptr->action_ptr)) continue;
@@ -577,17 +743,18 @@ void _wlmaker_launcher_start(wlmaker_launcher_t *launcher_ptr)
         return;
     }
 
+    if (NULL == cmdline_ptr) cmdline_ptr = launcher_ptr->cmdline_ptr;
+    if (NULL == cmdline_ptr || 0 == *cmdline_ptr) return;
     bs_subprocess_t *subprocess_ptr = bs_subprocess_create_cmdline(
-        launcher_ptr->cmdline_ptr);
+        cmdline_ptr);
     if (NULL == subprocess_ptr) {
         bs_log(BS_ERROR, "Failed bs_subprocess_create_cmdline(%s)",
-               launcher_ptr->cmdline_ptr);
+               cmdline_ptr);
         return;
     }
 
     if (!bs_subprocess_start(subprocess_ptr)) {
-        bs_log(BS_ERROR, "Failed bs_subprocess_start for %s",
-               launcher_ptr->cmdline_ptr);
+        bs_log(BS_ERROR, "Failed bs_subprocess_start for %s", cmdline_ptr);
         bs_subprocess_destroy(subprocess_ptr);
         return;
     }

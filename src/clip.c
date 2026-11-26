@@ -40,6 +40,8 @@
 #include "backend/backend.h"
 #include "backend/output_config.h"
 #include "dock.h"
+#include "popup_menu.h"
+#include "subprocess_monitor.h"
 #include "files.h"
 #include "toolkit/toolkit.h"
 
@@ -108,6 +110,7 @@ static bool _wlmaker_clip_pointer_button(
     wlmtk_element_t *element_ptr,
     const wlmtk_button_event_t *button_event_ptr);
 
+static void _wlmaker_clip_open_menu(wlmaker_clip_t *clip_ptr);
 static void _wlmaker_clip_apply_style(
     wlmaker_clip_t *clip_ptr,
     const wlmaker_config_style_t *style_ptr);
@@ -354,6 +357,9 @@ void wlmaker_clip_refresh(wlmaker_clip_t *clip_ptr)
 void wlmaker_clip_destroy(wlmaker_clip_t *clip_ptr)
 {
     if (NULL != clip_ptr->server_ptr) {
+        wlmaker_popup_menu_cancel(clip_ptr->server_ptr->popup_menu_ptr, clip_ptr);
+    }
+    if (NULL != clip_ptr->server_ptr) {
         clip_ptr->server_ptr->clip_dock_ptr = NULL;
     }
 
@@ -462,6 +468,12 @@ bool _wlmaker_clip_pointer_button(
         element_ptr, wlmaker_clip_t,
         super_tile.super_container.super_element);
 
+    // Right click: The clip's menu (workspaces), as Window Maker's.
+    if (BTN_RIGHT == button_event_ptr->button &&
+        WLMTK_BUTTON_CLICK == button_event_ptr->type) {
+        _wlmaker_clip_open_menu(clip_ptr);
+        return true;
+    }
     if (BTN_LEFT != button_event_ptr->button) return true;
 
     switch (button_event_ptr->type) {
@@ -945,6 +957,100 @@ void _wlmaker_clip_handle_theme_changed(
     wlmaker_clip_t *clip_ptr = BS_CONTAINER_OF(
         listener_ptr, wlmaker_clip_t, theme_changed_listener);
     _wlmaker_clip_apply_style(clip_ptr, data_ptr);
+}
+
+/** Items of the clip's menu; workspaces are 100 + their index. */
+enum {
+    _CLIP_MENU_RENAME = 1,
+    _CLIP_MENU_ADD,
+    _CLIP_MENU_REMOVE,
+    _CLIP_MENU_WORKSPACE = 100,
+};
+
+/* ------------------------------------------------------------------------- */
+/** Runs the settings tool to change workspaces (persisted in the state). */
+static void _wlmaker_clip_run_settings(
+    wlmaker_clip_t *clip_ptr,
+    const char *option_ptr,
+    const char *arg_ptr)
+{
+    const char *cmd_ptr = bspl_dict_get_string_value(
+        clip_ptr->server_ptr->config_dict_ptr, "SettingsCommand");
+    const char *argv[] = {
+        "/bin/sh", "-c", "exec \"$0\" \"$1\" \"$2\"",
+        NULL != cmd_ptr ? cmd_ptr : "wmaker-next-settings",
+        option_ptr, NULL != arg_ptr ? arg_ptr : "", NULL };
+    wlmaker_subprocess_monitor_run(
+        clip_ptr->server_ptr->monitor_ptr,
+        bs_subprocess_create(argv[0], argv, NULL));
+}
+
+/* ------------------------------------------------------------------------- */
+/** A clip menu item was chosen. */
+static void _wlmaker_clip_handle_menu_item(void *ud_ptr, int id)
+{
+    wlmaker_clip_t *clip_ptr = ud_ptr;
+    wlmtk_root_t *root_ptr = clip_ptr->server_ptr->root_ptr;
+    char index_str[16];
+    int index = 0;
+    wlmtk_workspace_t *current_ptr = wlmtk_root_get_current_workspace(root_ptr);
+    if (NULL != current_ptr) {
+        const char *name_ptr;
+        wlmtk_workspace_get_details(current_ptr, &name_ptr, &index);
+    }
+    switch (id) {
+    case _CLIP_MENU_RENAME:
+        snprintf(index_str, sizeof(index_str), "%d", index + 1);
+        _wlmaker_clip_run_settings(clip_ptr, "--rename-workspace", index_str);
+        break;
+    case _CLIP_MENU_ADD:
+        _wlmaker_clip_run_settings(clip_ptr, "--add-workspace", NULL);
+        break;
+    case _CLIP_MENU_REMOVE:
+        _wlmaker_clip_run_settings(clip_ptr, "--remove-last-workspace", NULL);
+        break;
+    default:
+        if (id >= _CLIP_MENU_WORKSPACE) {
+            wlmtk_workspace_t *ws_ptr = wlmtk_root_get_workspace(
+                root_ptr, id - _CLIP_MENU_WORKSPACE);
+            if (NULL != ws_ptr) wlmtk_root_switch_to_workspace(root_ptr, ws_ptr);
+        }
+        break;
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+/** Opens the clip's menu: Workspaces to switch to; rename, add, remove. */
+void _wlmaker_clip_open_menu(wlmaker_clip_t *clip_ptr)
+{
+    wlmaker_popup_menu_t *pm_ptr = clip_ptr->server_ptr->popup_menu_ptr;
+    if (NULL == pm_ptr) return;
+    wlmtk_root_t *root_ptr = clip_ptr->server_ptr->root_ptr;
+    wlmtk_workspace_t *current_ptr = wlmtk_root_get_current_workspace(root_ptr);
+
+    enum { MAX_WS = 32 };
+    char texts[MAX_WS][80];
+    wlmaker_popup_menu_item_t items[MAX_WS + 3];
+    size_t n = 0;
+    for (int i = 0; i < MAX_WS; ++i) {
+        wlmtk_workspace_t *ws_ptr = wlmtk_root_get_workspace(root_ptr, i);
+        if (NULL == ws_ptr) break;
+        const char *name_ptr;
+        int index;
+        wlmtk_workspace_get_details(ws_ptr, &name_ptr, &index);
+        snprintf(texts[i], sizeof(texts[i]), "%d  %s", i + 1,
+                 NULL != name_ptr ? name_ptr : "");
+        items[n++] = (wlmaker_popup_menu_item_t){
+            texts[i], _CLIP_MENU_WORKSPACE + i, ws_ptr != current_ptr };
+    }
+    items[n++] = (wlmaker_popup_menu_item_t){
+        "Rename workspace...", _CLIP_MENU_RENAME, true };
+    items[n++] = (wlmaker_popup_menu_item_t){
+        "New workspace", _CLIP_MENU_ADD, true };
+    items[n++] = (wlmaker_popup_menu_item_t){
+        "Remove last workspace", _CLIP_MENU_REMOVE, true };
+    wlmaker_popup_menu_open(pm_ptr, "Workspaces", items, n,
+                            _wlmaker_clip_handle_menu_item, clip_ptr);
 }
 
 /* ------------------------------------------------------------------------- */

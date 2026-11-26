@@ -85,6 +85,36 @@ void wlmaker_launcher_set_drop_handler(
 /** @return The launcher's plist definition. */
 bspl_dict_t *wlmaker_launcher_dict(wlmaker_launcher_t *launcher_ptr);
 
+/** Sets the handler of right clicks: Opens the dock's menu for it. */
+void wlmaker_launcher_set_menu_handler(
+    wlmaker_launcher_t *launcher_ptr,
+    void (*menu_fn)(void *ud_ptr, wlmaker_launcher_t *launcher_ptr),
+    void *ud_ptr);
+
+/** Launches the application (or runs the action), as a left click does. */
+void wlmaker_launcher_launch(wlmaker_launcher_t *launcher_ptr);
+
+/** @return whether windows of applications it launched are mapped. */
+bool wlmaker_launcher_is_running(wlmaker_launcher_t *launcher_ptr);
+
+/** @return whether it has a command (not just an action). */
+bool wlmaker_launcher_has_command(wlmaker_launcher_t *launcher_ptr);
+
+/** @return whether it is protected from removal ('Lock'). */
+bool wlmaker_launcher_is_locked(wlmaker_launcher_t *launcher_ptr);
+
+/** @return whether it launches as the session starts ('AutoLaunch'). */
+bool wlmaker_launcher_auto_launches(wlmaker_launcher_t *launcher_ptr);
+
+/** @return whether any window it launched is shown (not minimized). */
+bool wlmaker_launcher_any_shown(wlmaker_launcher_t *launcher_ptr);
+
+/**
+ * Hides (minimizes) the windows it launched, if any is shown; else shows
+ * them again. @return true if it hid them.
+ */
+bool wlmaker_launcher_toggle_hidden(wlmaker_launcher_t *launcher_ptr);
+
 /** @return A pointer to the @ref wlmtk_tile_t superclass of `launcher_ptr`. */
 wlmtk_tile_t *wlmaker_launcher_tile(wlmaker_launcher_t *launcher_ptr);
 

@@ -55,6 +55,7 @@
 #include "server.h"
 #include "task_list.h"
 #include "window_rules.h"
+#include "popup_menu.h"
 #include "toolkit/toolkit.h"
 
 /** Will hold the value of --config_file. */
@@ -948,6 +949,10 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     if (NULL == server_ptr->window_list_ptr) {
         return EXIT_FAILURE;
     }
+    server_ptr->popup_menu_ptr = wlmaker_popup_menu_create(server_ptr);
+    if (NULL == server_ptr->popup_menu_ptr) {
+        return EXIT_FAILURE;
+    }
 
     wlmaker_action_handle_ptr = wlmaker_action_bind_keys(
         server_ptr,
@@ -1021,6 +1026,10 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     if (NULL != sighup_source_ptr) wl_event_source_remove(sighup_source_ptr);
     if (NULL != wlmaker_window_rules_ptr) {
         wlmaker_window_rules_destroy(wlmaker_window_rules_ptr);
+    }
+    if (NULL != server_ptr->popup_menu_ptr) {
+        wlmaker_popup_menu_destroy(server_ptr->popup_menu_ptr);
+        server_ptr->popup_menu_ptr = NULL;
     }
     if (NULL != wlmaker_icon_area_ptr) {
         wlmaker_icon_area_destroy(wlmaker_icon_area_ptr);

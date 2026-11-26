@@ -25,6 +25,7 @@
 #include <libbase/plist.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wayland-server-core.h>
@@ -42,6 +43,8 @@
 #include "default_state.h"
 #include "files.h"
 #include "launcher.h"
+#include "subprocess_monitor.h"
+#include "popup_menu.h"
 #include "toolkit/toolkit.h"
 
 /* == Declarations ========================================================= */
@@ -72,6 +75,19 @@ struct _wlmaker_dock_t {
     size_t                    launchers;
     /** Tile size from the state's `TileSize`, or 0 for the theme's. */
     uint64_t                  tile_size;
+    /** The launcher whose menu is open. */
+    wlmaker_launcher_t        *menu_launcher_ptr;
+};
+
+/** Auto-launching happens once per session: Not on re-creating the dock. */
+static bool _wlmaker_dock_auto_launched = false;
+
+/** Items of a launcher's menu. */
+enum {
+    _DOCK_MENU_LAUNCH,
+    _DOCK_MENU_HIDE,
+    _DOCK_MENU_SETTINGS,
+    _DOCK_MENU_REMOVE,
 };
 
 static bool _wlmaker_dock_decode_launchers(
@@ -97,6 +113,10 @@ static void _wlmaker_dock_handle_drop(
     double x,
     double y);
 static bool _wlmaker_dock_save(wlmaker_dock_t *dock_ptr);
+static void _wlmaker_dock_handle_launcher_menu(
+    void *ud_ptr,
+    wlmaker_launcher_t *launcher_ptr);
+static void _wlmaker_dock_handle_menu_item(void *ud_ptr, int id);
 
 /* == Data ================================================================= */
 
@@ -314,6 +334,8 @@ wlmaker_dock_t *wlmaker_dock_create(
         wlmaker_launcher_set_server(launcher_ptr, server_ptr);
         wlmaker_launcher_set_drop_handler(
             launcher_ptr, _wlmaker_dock_handle_drop, dock_ptr);
+        wlmaker_launcher_set_menu_handler(
+            launcher_ptr, _wlmaker_dock_handle_launcher_menu, dock_ptr);
         dock_ptr->launchers_ptr[dock_ptr->launchers++] = launcher_ptr;
         wlmtk_dock_add_tile(
             dock_ptr->wlmtk_dock_ptr,
@@ -321,6 +343,16 @@ wlmaker_dock_t *wlmaker_dock_create(
     }
     free(dicts_ptr);
     wlmtk_dock_set_lines(dock_ptr->wlmtk_dock_ptr, args.lines, 1 == args.order);
+
+    // Window Maker's "Start when Window Maker is started": Once a session.
+    if (!_wlmaker_dock_auto_launched) {
+        _wlmaker_dock_auto_launched = true;
+        for (size_t i = 0; i < dock_ptr->launchers; ++i) {
+            if (wlmaker_launcher_auto_launches(dock_ptr->launchers_ptr[i])) {
+                wlmaker_launcher_launch(dock_ptr->launchers_ptr[i]);
+            }
+        }
+    }
 
     // FIXME: This is leaky.
     if (NULL != args.launchers_array_ptr) {
@@ -353,6 +385,9 @@ wlmaker_dock_t *wlmaker_dock_create(
 /* ------------------------------------------------------------------------- */
 void wlmaker_dock_destroy(wlmaker_dock_t *dock_ptr)
 {
+    if (NULL != dock_ptr->server_ptr) {
+        wlmaker_popup_menu_cancel(dock_ptr->server_ptr->popup_menu_ptr, dock_ptr);
+    }
     wlmtk_util_disconnect_listener(&dock_ptr->output_layout_change_listener);
     wlmtk_util_disconnect_listener(&dock_ptr->workspace_changed_listener);
     wlmtk_util_disconnect_listener(&dock_ptr->theme_changed_listener);
@@ -477,6 +512,94 @@ struct wlmtk_tile_style _wlmaker_dock_tile_style(
     const struct wlmtk_tile_style *theme_tile_style_ptr)
 {
     return wlmaker_pane_tile_style(dock_ptr->tile_size, theme_tile_style_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+/** Right click on a launcher: Its menu, as Window Maker's dock icons have. */
+void _wlmaker_dock_handle_launcher_menu(
+    void *ud_ptr,
+    wlmaker_launcher_t *launcher_ptr)
+{
+    wlmaker_dock_t *dock_ptr = ud_ptr;
+    if (NULL == dock_ptr->server_ptr->popup_menu_ptr) return;
+    dock_ptr->menu_launcher_ptr = launcher_ptr;
+    bool running = wlmaker_launcher_is_running(launcher_ptr);
+    const wlmaker_popup_menu_item_t items[] = {
+        { "Launch", _DOCK_MENU_LAUNCH, true },
+        { running && !wlmaker_launcher_any_shown(launcher_ptr) ?
+          "Unhide" : "Hide", _DOCK_MENU_HIDE, running },
+        { "Settings...", _DOCK_MENU_SETTINGS, true },
+        { "Remove from dock", _DOCK_MENU_REMOVE,
+          !wlmaker_launcher_is_locked(launcher_ptr) },
+    };
+    wlmaker_popup_menu_open(
+        dock_ptr->server_ptr->popup_menu_ptr, "Dock",
+        items, sizeof(items) / sizeof(items[0]),
+        _wlmaker_dock_handle_menu_item, dock_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+/** An item of a launcher's menu was chosen. */
+void _wlmaker_dock_handle_menu_item(void *ud_ptr, int id)
+{
+    wlmaker_dock_t *dock_ptr = ud_ptr;
+    wlmaker_launcher_t *launcher_ptr = dock_ptr->menu_launcher_ptr;
+    dock_ptr->menu_launcher_ptr = NULL;
+    size_t index = SIZE_MAX;
+    for (size_t i = 0; i < dock_ptr->launchers; ++i) {
+        if (dock_ptr->launchers_ptr[i] == launcher_ptr) index = i;
+    }
+    if (SIZE_MAX == index) return;
+
+    switch (id) {
+    case _DOCK_MENU_LAUNCH:
+        wlmaker_launcher_launch(launcher_ptr);
+        break;
+
+    case _DOCK_MENU_HIDE:
+        wlmaker_launcher_toggle_hidden(launcher_ptr);
+        break;
+
+    case _DOCK_MENU_SETTINGS: {
+        // The settings tool edits the launcher, by its index in State.plist.
+        bspl_array_t *array_ptr = bspl_dict_get_array(
+            bspl_dict_get_dict(dock_ptr->state_dict_ptr, "Dock"), "Launchers");
+        size_t n = bspl_array_size(array_ptr), state_index = SIZE_MAX;
+        for (size_t i = 0; i < n; ++i) {
+            if (bspl_dict_from_object(bspl_array_at(array_ptr, i)) ==
+                wlmaker_launcher_dict(launcher_ptr)) state_index = i;
+        }
+        if (SIZE_MAX == state_index) state_index = index;
+        char index_str[24];
+        snprintf(index_str, sizeof(index_str), "%zu", state_index);
+        const char *cmd_ptr = bspl_dict_get_string_value(
+            dock_ptr->server_ptr->config_dict_ptr, "SettingsCommand");
+        const char *argv[] = {
+            "/bin/sh", "-c", "exec \"$0\" --launcher \"$1\"",
+            NULL != cmd_ptr ? cmd_ptr : "wmaker-next-settings", index_str, NULL };
+        wlmaker_subprocess_monitor_run(
+            dock_ptr->server_ptr->monitor_ptr,
+            bs_subprocess_create(argv[0], argv, NULL));
+        break;
+    }
+
+    case _DOCK_MENU_REMOVE:
+        if (wlmaker_launcher_is_locked(launcher_ptr)) break;
+        wlmtk_dock_remove_tile(dock_ptr->wlmtk_dock_ptr,
+                               wlmaker_launcher_tile(launcher_ptr));
+        for (size_t i = index; i + 1 < dock_ptr->launchers; ++i) {
+            dock_ptr->launchers_ptr[i] = dock_ptr->launchers_ptr[i + 1];
+        }
+        --dock_ptr->launchers;
+        if (!_wlmaker_dock_save(dock_ptr)) {
+            bs_log(BS_WARNING, "Failed to save the dock after a removal.");
+        }
+        wlmaker_launcher_destroy(launcher_ptr);
+        break;
+
+    default:
+        break;
+    }
 }
 
 /* ------------------------------------------------------------------------- */
