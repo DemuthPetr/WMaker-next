@@ -34,6 +34,8 @@
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_keyboard.h>
+#include <wlr/types/wlr_pointer.h>
+#include <wlr/types/wlr_pointer_gestures_v1.h>
 #include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #undef WLR_USE_UNSTABLE
@@ -65,6 +67,24 @@ struct _wlmim_cursor_t {
     struct wl_listener        axis_listener;
     /** Listener for the `frame` event of `wlr_cursor`. */
     struct wl_listener        frame_listener;
+    /** Touchpad gestures (swipe, pinch, hold), forwarded to clients. */
+    struct wlr_pointer_gestures_v1 *wlr_pointer_gestures_ptr;
+    /** Listeners for the gesture events of `wlr_cursor`. */
+    struct wl_listener        swipe_begin_listener;
+    /** See @ref wlmim_cursor_t::swipe_begin_listener. */
+    struct wl_listener        swipe_update_listener;
+    /** See @ref wlmim_cursor_t::swipe_begin_listener. */
+    struct wl_listener        swipe_end_listener;
+    /** See @ref wlmim_cursor_t::swipe_begin_listener. */
+    struct wl_listener        pinch_begin_listener;
+    /** See @ref wlmim_cursor_t::swipe_begin_listener. */
+    struct wl_listener        pinch_update_listener;
+    /** See @ref wlmim_cursor_t::swipe_begin_listener. */
+    struct wl_listener        pinch_end_listener;
+    /** See @ref wlmim_cursor_t::swipe_begin_listener. */
+    struct wl_listener        hold_begin_listener;
+    /** See @ref wlmim_cursor_t::swipe_begin_listener. */
+    struct wl_listener        hold_end_listener;
 
     /** Listener for the `request_set_cursor` event of `wlr_seat`. */
     struct wl_listener        seat_request_set_cursor_listener;
@@ -144,6 +164,19 @@ static const char *_wlmim_cursor_system_config_file =
 static const char *_wlmim_cursor_system_config_alternative_file =
     "/etc/alternatives/x-cursor-theme";
 
+/** Declares a gesture event handler. */
+#define _WLMIM_CURSOR_GESTURE_HANDLER(name) \
+    static void _wlmim_cursor_handle_##name( \
+        struct wl_listener *listener_ptr, void *data_ptr)
+_WLMIM_CURSOR_GESTURE_HANDLER(swipe_begin);
+_WLMIM_CURSOR_GESTURE_HANDLER(swipe_update);
+_WLMIM_CURSOR_GESTURE_HANDLER(swipe_end);
+_WLMIM_CURSOR_GESTURE_HANDLER(pinch_begin);
+_WLMIM_CURSOR_GESTURE_HANDLER(pinch_update);
+_WLMIM_CURSOR_GESTURE_HANDLER(pinch_end);
+_WLMIM_CURSOR_GESTURE_HANDLER(hold_begin);
+_WLMIM_CURSOR_GESTURE_HANDLER(hold_end);
+
 /* == Exported methods ===================================================== */
 
 /* ------------------------------------------------------------------------- */
@@ -217,6 +250,41 @@ wlmim_cursor_t *wlmim_cursor_create(
         &cursor_ptr->seat_request_set_cursor_listener,
         _wlmim_cursor_handle_seat_request_set_cursor);
 
+    // Touchpad gestures (zwp_pointer_gestures_v1): For pinch-zoom & swipes.
+    // Some clients also rely on the global being there (Gwenview crashed
+    // tearing down its image views without it).
+    cursor_ptr->wlr_pointer_gestures_ptr = wlr_pointer_gestures_v1_create(
+        wlr_seat_ptr->display);
+    if (NULL == cursor_ptr->wlr_pointer_gestures_ptr) {
+        bs_log(BS_WARNING, "Failed wlr_pointer_gestures_v1_create()");
+    } else {
+        struct wlr_cursor *c = cursor_ptr->wlr_cursor_ptr;
+        wlmtk_util_connect_listener_signal(
+            &c->events.swipe_begin, &cursor_ptr->swipe_begin_listener,
+            _wlmim_cursor_handle_swipe_begin);
+        wlmtk_util_connect_listener_signal(
+            &c->events.swipe_update, &cursor_ptr->swipe_update_listener,
+            _wlmim_cursor_handle_swipe_update);
+        wlmtk_util_connect_listener_signal(
+            &c->events.swipe_end, &cursor_ptr->swipe_end_listener,
+            _wlmim_cursor_handle_swipe_end);
+        wlmtk_util_connect_listener_signal(
+            &c->events.pinch_begin, &cursor_ptr->pinch_begin_listener,
+            _wlmim_cursor_handle_pinch_begin);
+        wlmtk_util_connect_listener_signal(
+            &c->events.pinch_update, &cursor_ptr->pinch_update_listener,
+            _wlmim_cursor_handle_pinch_update);
+        wlmtk_util_connect_listener_signal(
+            &c->events.pinch_end, &cursor_ptr->pinch_end_listener,
+            _wlmim_cursor_handle_pinch_end);
+        wlmtk_util_connect_listener_signal(
+            &c->events.hold_begin, &cursor_ptr->hold_begin_listener,
+            _wlmim_cursor_handle_hold_begin);
+        wlmtk_util_connect_listener_signal(
+            &c->events.hold_end, &cursor_ptr->hold_end_listener,
+            _wlmim_cursor_handle_hold_end);
+    }
+
     return cursor_ptr;
 }
 
@@ -226,6 +294,14 @@ void wlmim_cursor_destroy(wlmim_cursor_t *cursor_ptr)
     wlmtk_util_disconnect_listener(
         &cursor_ptr->seat_request_set_cursor_listener);
     if (NULL != cursor_ptr->wlr_cursor_ptr) {
+        wlmtk_util_disconnect_listener(&cursor_ptr->hold_end_listener);
+        wlmtk_util_disconnect_listener(&cursor_ptr->hold_begin_listener);
+        wlmtk_util_disconnect_listener(&cursor_ptr->pinch_end_listener);
+        wlmtk_util_disconnect_listener(&cursor_ptr->pinch_update_listener);
+        wlmtk_util_disconnect_listener(&cursor_ptr->pinch_begin_listener);
+        wlmtk_util_disconnect_listener(&cursor_ptr->swipe_end_listener);
+        wlmtk_util_disconnect_listener(&cursor_ptr->swipe_update_listener);
+        wlmtk_util_disconnect_listener(&cursor_ptr->swipe_begin_listener);
         wlmtk_util_disconnect_listener(&cursor_ptr->frame_listener);
         wlmtk_util_disconnect_listener(&cursor_ptr->axis_listener);
         wlmtk_util_disconnect_listener(&cursor_ptr->button_listener);
@@ -568,6 +644,81 @@ int _wlmim_cursor_theme_handler(
     *theme_name_ptr_ptr = logged_strdup(value_ptr);
     if (NULL == *theme_name_ptr_ptr) return 0;
     return 1;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Touchpad gestures: Forwarded to the client with pointer focus.            */
+
+/** Gesture handler preamble: The cursor, and the event of type `type`. */
+#define _WLMIM_CURSOR_GESTURE(listener, type) \
+    wlmim_cursor_t *cursor_ptr = BS_CONTAINER_OF( \
+        listener_ptr, wlmim_cursor_t, listener); \
+    struct type *ev_ptr = data_ptr; \
+    wlmim_report_activity(cursor_ptr->input_manager_ptr)
+
+_WLMIM_CURSOR_GESTURE_HANDLER(swipe_begin)
+{
+    _WLMIM_CURSOR_GESTURE(swipe_begin_listener, wlr_pointer_swipe_begin_event);
+    wlr_pointer_gestures_v1_send_swipe_begin(
+        cursor_ptr->wlr_pointer_gestures_ptr, cursor_ptr->wlr_seat_ptr,
+        ev_ptr->time_msec, ev_ptr->fingers);
+}
+
+_WLMIM_CURSOR_GESTURE_HANDLER(swipe_update)
+{
+    _WLMIM_CURSOR_GESTURE(swipe_update_listener, wlr_pointer_swipe_update_event);
+    wlr_pointer_gestures_v1_send_swipe_update(
+        cursor_ptr->wlr_pointer_gestures_ptr, cursor_ptr->wlr_seat_ptr,
+        ev_ptr->time_msec, ev_ptr->dx, ev_ptr->dy);
+}
+
+_WLMIM_CURSOR_GESTURE_HANDLER(swipe_end)
+{
+    _WLMIM_CURSOR_GESTURE(swipe_end_listener, wlr_pointer_swipe_end_event);
+    wlr_pointer_gestures_v1_send_swipe_end(
+        cursor_ptr->wlr_pointer_gestures_ptr, cursor_ptr->wlr_seat_ptr,
+        ev_ptr->time_msec, ev_ptr->cancelled);
+}
+
+_WLMIM_CURSOR_GESTURE_HANDLER(pinch_begin)
+{
+    _WLMIM_CURSOR_GESTURE(pinch_begin_listener, wlr_pointer_pinch_begin_event);
+    wlr_pointer_gestures_v1_send_pinch_begin(
+        cursor_ptr->wlr_pointer_gestures_ptr, cursor_ptr->wlr_seat_ptr,
+        ev_ptr->time_msec, ev_ptr->fingers);
+}
+
+_WLMIM_CURSOR_GESTURE_HANDLER(pinch_update)
+{
+    _WLMIM_CURSOR_GESTURE(pinch_update_listener, wlr_pointer_pinch_update_event);
+    wlr_pointer_gestures_v1_send_pinch_update(
+        cursor_ptr->wlr_pointer_gestures_ptr, cursor_ptr->wlr_seat_ptr,
+        ev_ptr->time_msec, ev_ptr->dx, ev_ptr->dy, ev_ptr->scale,
+        ev_ptr->rotation);
+}
+
+_WLMIM_CURSOR_GESTURE_HANDLER(pinch_end)
+{
+    _WLMIM_CURSOR_GESTURE(pinch_end_listener, wlr_pointer_pinch_end_event);
+    wlr_pointer_gestures_v1_send_pinch_end(
+        cursor_ptr->wlr_pointer_gestures_ptr, cursor_ptr->wlr_seat_ptr,
+        ev_ptr->time_msec, ev_ptr->cancelled);
+}
+
+_WLMIM_CURSOR_GESTURE_HANDLER(hold_begin)
+{
+    _WLMIM_CURSOR_GESTURE(hold_begin_listener, wlr_pointer_hold_begin_event);
+    wlr_pointer_gestures_v1_send_hold_begin(
+        cursor_ptr->wlr_pointer_gestures_ptr, cursor_ptr->wlr_seat_ptr,
+        ev_ptr->time_msec, ev_ptr->fingers);
+}
+
+_WLMIM_CURSOR_GESTURE_HANDLER(hold_end)
+{
+    _WLMIM_CURSOR_GESTURE(hold_end_listener, wlr_pointer_hold_end_event);
+    wlr_pointer_gestures_v1_send_hold_end(
+        cursor_ptr->wlr_pointer_gestures_ptr, cursor_ptr->wlr_seat_ptr,
+        ev_ptr->time_msec, ev_ptr->cancelled);
 }
 
 /* == Unit tests =========================================================== */
