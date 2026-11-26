@@ -149,6 +149,10 @@ struct _wlmtk_window_t {
     bool                      keep_at_bottom;
     /** Shown on all workspaces. */
     bool                      omnipresent;
+    /** Attributes, see @ref wlmtk_window_attribute_t. */
+    uint32_t                  attributes;
+    /** Whether start rules were applied. */
+    bool                      rules_applied;
     /** Whether this window is currently minimized (iconified). */
     bool                      minimized;
     /** Whether "Show Desktop" minimized it, to restore it on the toggle. */
@@ -821,6 +825,37 @@ void wlmtk_window_request_shaded(wlmtk_window_t *window_ptr, bool shaded)
 }
 
 /* ------------------------------------------------------------------------- */
+void wlmtk_window_set_attributes(wlmtk_window_t *window_ptr, uint32_t attributes)
+{
+    if (window_ptr->attributes == attributes) return;
+    window_ptr->attributes = attributes;
+    if ((attributes & WLMTK_WINDOW_ATTR_NO_FOCUS) && window_ptr->activated &&
+        NULL != window_ptr->workspace_ptr) {
+        wlmtk_workspace_activate_window(window_ptr->workspace_ptr, NULL);
+    }
+    _wlmtk_window_apply_decoration(window_ptr);
+    wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+uint32_t wlmtk_window_get_attributes(wlmtk_window_t *window_ptr)
+{
+    return window_ptr->attributes;
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_window_set_rules_applied(wlmtk_window_t *window_ptr, bool applied)
+{
+    window_ptr->rules_applied = applied;
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmtk_window_rules_applied(wlmtk_window_t *window_ptr)
+{
+    return window_ptr->rules_applied;
+}
+
+/* ------------------------------------------------------------------------- */
 bool wlmtk_window_is_resizable(wlmtk_window_t *window_ptr)
 {
     return window_ptr->properties & WLMTK_WINDOW_PROPERTY_RESIZABLE;
@@ -1324,20 +1359,27 @@ void _wlmtk_window_element_layout(
 void _wlmtk_window_apply_decoration(wlmtk_window_t *window_ptr)
 {
     struct wlmtk_margin_style bstyle = window_ptr->style_ptr->border;
+    uint32_t attrs = window_ptr->attributes;
 
-    if (window_ptr->server_side_decorated && !window_ptr->fullscreen) {
+    if (window_ptr->server_side_decorated && !window_ptr->fullscreen &&
+        !(attrs & WLMTK_WINDOW_ATTR_NO_TITLEBAR)) {
         _wlmtk_window_create_titlebar(window_ptr);
     } else {
-        bstyle.width = 0;
         _wlmtk_window_destroy_titlebar(window_ptr);
+    }
+    if (!window_ptr->server_side_decorated || window_ptr->fullscreen ||
+        (attrs & WLMTK_WINDOW_ATTR_NO_BORDER)) {
+        bstyle.width = 0;
     }
 
     if (NULL != window_ptr->titlebar_ptr) {
         uint32_t properties = 0;
-        if (window_ptr->properties & WLMTK_WINDOW_PROPERTY_ICONIFIABLE) {
+        if ((window_ptr->properties & WLMTK_WINDOW_PROPERTY_ICONIFIABLE) &&
+            !(attrs & WLMTK_WINDOW_ATTR_NO_MINIATURIZE_BUTTON)) {
             properties |= WLMTK_TITLEBAR_PROPERTY_ICONIFY;
         }
-        if (window_ptr->properties & WLMTK_WINDOW_PROPERTY_CLOSABLE) {
+        if ((window_ptr->properties & WLMTK_WINDOW_PROPERTY_CLOSABLE) &&
+            !(attrs & WLMTK_WINDOW_ATTR_NO_CLOSE_BUTTON)) {
             properties |= WLMTK_TITLEBAR_PROPERTY_CLOSE;
         }
         wlmtk_titlebar_set_properties(window_ptr->titlebar_ptr, properties);
@@ -1347,7 +1389,8 @@ void _wlmtk_window_apply_decoration(wlmtk_window_t *window_ptr)
 
     if (window_ptr->server_side_decorated &&
         !window_ptr->fullscreen &&
-        (window_ptr->properties & WLMTK_WINDOW_PROPERTY_RESIZABLE)) {
+        (window_ptr->properties & WLMTK_WINDOW_PROPERTY_RESIZABLE) &&
+        !(attrs & WLMTK_WINDOW_ATTR_NO_RESIZEBAR)) {
         _wlmtk_window_create_resizebar(window_ptr);
     } else {
         _wlmtk_window_destroy_resizebar(window_ptr);
@@ -1393,7 +1436,9 @@ void _wlmtk_window_create_titlebar(wlmtk_window_t *window_ptr)
 /** Destroys the titlebar. */
 void _wlmtk_window_destroy_titlebar(wlmtk_window_t *window_ptr)
 {
-    BS_ASSERT(!window_ptr->server_side_decorated || window_ptr->fullscreen);
+    // Decorated windows lose it in fullscreen, or by an attribute.
+    BS_ASSERT(!window_ptr->server_side_decorated || window_ptr->fullscreen ||
+              (window_ptr->attributes & WLMTK_WINDOW_ATTR_NO_TITLEBAR));
 
     if (NULL == window_ptr->titlebar_ptr) return;
 
@@ -1429,7 +1474,8 @@ void _wlmtk_window_destroy_resizebar(wlmtk_window_t *window_ptr)
 {
     BS_ASSERT(!window_ptr->server_side_decorated ||
               window_ptr->fullscreen ||
-              !(window_ptr->properties & WLMTK_WINDOW_PROPERTY_RESIZABLE));
+              !(window_ptr->properties & WLMTK_WINDOW_PROPERTY_RESIZABLE) ||
+              (window_ptr->attributes & WLMTK_WINDOW_ATTR_NO_RESIZEBAR));
 
     if (NULL == window_ptr->resizebar_ptr) return;
 

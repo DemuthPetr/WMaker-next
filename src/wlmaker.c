@@ -54,6 +54,7 @@
 #include "root_menu.h"
 #include "server.h"
 #include "task_list.h"
+#include "window_rules.h"
 #include "toolkit/toolkit.h"
 
 /** Will hold the value of --config_file. */
@@ -177,6 +178,8 @@ static wlmaker_dock_t         *wlmaker_dock_ptr = NULL;
 static wlmaker_clip_t         *wlmaker_clip_ptr = NULL;
 /** The icon area, holding mini-windows. */
 static wlmaker_icon_area_t    *wlmaker_icon_area_ptr = NULL;
+/** Per-application window rules. */
+static wlmaker_window_rules_t *wlmaker_window_rules_ptr = NULL;
 /** Regular expression string for extracting file & line no. from wlr_log. */
 static const char             *wlmaker_wlr_log_regex_string =
     "^\\[([^\\:]+)\\:([0-9]+)\\]\\ ";
@@ -500,6 +503,9 @@ static void _wlmaker_reload_config(wlmaker_server_t *server_ptr)
     }
 
     _wlmaker_reload_server_config(server_ptr, config_dict_ptr);
+    if (NULL != wlmaker_window_rules_ptr) {
+        wlmaker_window_rules_set_config(wlmaker_window_rules_ptr, config_dict_ptr);
+    }
 
     const char *theme_file_ptr = _wlmaker_theme_file(config_dict_ptr);
     bool theme_changed = (NULL == theme_file_ptr) !=
@@ -916,6 +922,9 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     wlmaker_server_t *server_ptr = wlmaker_server_create(
         config_dict_ptr, files_ptr, &style, &wlmaker_server_options);
     if (NULL == server_ptr) return EXIT_FAILURE;
+    // Before the taskbar & others listen to mapping: They see the attributes.
+    wlmaker_window_rules_ptr = wlmaker_window_rules_create(
+        server_ptr, config_dict_ptr);
 
     _wlmaker_apply_effects(server_ptr, config_dict_ptr);
     _wlmaker_apply_windows(server_ptr, config_dict_ptr);
@@ -1010,6 +1019,9 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
         wlmaker_foreign_toplevel_destroy(foreign_toplevel_ptr);
     }
     if (NULL != sighup_source_ptr) wl_event_source_remove(sighup_source_ptr);
+    if (NULL != wlmaker_window_rules_ptr) {
+        wlmaker_window_rules_destroy(wlmaker_window_rules_ptr);
+    }
     if (NULL != wlmaker_icon_area_ptr) {
         wlmaker_icon_area_destroy(wlmaker_icon_area_ptr);
     }

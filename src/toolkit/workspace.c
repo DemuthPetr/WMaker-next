@@ -898,6 +898,11 @@ void wlmtk_workspace_activate_window(
     wlmtk_workspace_t *workspace_ptr,
     wlmtk_window_t *window_ptr)
 {
+    // A window that never takes focus: Leave the focus where it is.
+    if (NULL != window_ptr &&
+        (wlmtk_window_get_attributes(window_ptr) & WLMTK_WINDOW_ATTR_NO_FOCUS)) {
+        return;
+    }
     // Activating a minimized window (eg. from the task list) restores it.
     if (NULL != window_ptr && wlmtk_window_is_minimized(window_ptr)) {
         wlmtk_workspace_restore_window(workspace_ptr, window_ptr);
@@ -1217,7 +1222,9 @@ double _wlmtk_workspace_target_opacity(wlmtk_window_t *window_ptr)
 bool _wlmtk_workspace_skip_cycling(wlmtk_window_t *window_ptr)
 {
     return wlmtk_window_is_minimized(window_ptr) ||
-        !wlmtk_window_is_iconifiable(window_ptr);
+        !wlmtk_window_is_iconifiable(window_ptr) ||
+        (wlmtk_window_get_attributes(window_ptr) &
+         (WLMTK_WINDOW_ATTR_SKIP_SWITCHER | WLMTK_WINDOW_ATTR_NO_FOCUS));
 }
 
 /* ------------------------------------------------------------------------- */

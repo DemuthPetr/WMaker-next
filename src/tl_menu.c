@@ -74,6 +74,8 @@ struct _wlmaker_tl_menu_t {
     wlmaker_action_item_t     *close_ai_ptr;
     /** Action item for 'Kill': Ends the application's process. */
     wlmaker_action_item_t     *kill_ai_ptr;
+    /** Action item for 'Attributes...': The application's window rules. */
+    wlmaker_action_item_t     *attributes_ai_ptr;
 
     /** Menu item for attaching the 'Other maximization' submenu. */
     wlmaker_action_item_t     *tile_ai_ptr;
@@ -205,6 +207,12 @@ static const wlmaker_action_item_desc_t _tl_menu_items[] = {
         WLMAKER_ACTION_NONE,
         NULL,
         offsetof(wlmaker_tl_menu_t, options_ai_ptr)
+    },
+    {
+        "Attributes...",
+        WLMAKER_ACTION_WINDOW_ATTRIBUTES,
+        NULL,
+        offsetof(wlmaker_tl_menu_t, attributes_ai_ptr)
     },
     {
         "Close",

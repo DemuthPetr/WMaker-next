@@ -262,6 +262,8 @@ void _wlmaker_window_list_add_workspace_items(
         // Skip the root menu and other menus (their window has no client).
         if (window_ptr == wlmaker_root_menu_window(
                 arg_ptr->window_list_ptr->server_ptr->root_menu_ptr)) continue;
+        if (wlmtk_window_get_attributes(window_ptr) &
+            WLMTK_WINDOW_ATTR_SKIP_WINDOW_LIST) continue;
         _wlmaker_window_list_add_item(
             arg_ptr->window_list_ptr, window_ptr, name_ptr,
             workspace_ptr == arg_ptr->current_workspace_ptr);

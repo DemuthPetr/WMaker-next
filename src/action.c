@@ -165,6 +165,7 @@ const bspl_enum_desc_t wlmaker_action_desc[] = {
     BSPL_ENUM("WindowUnshade", WLMAKER_ACTION_WINDOW_UNSHADE),
     BSPL_ENUM("WindowClose", WLMAKER_ACTION_WINDOW_CLOSE),
     BSPL_ENUM("WindowKill", WLMAKER_ACTION_WINDOW_KILL),
+    BSPL_ENUM("WindowAttributes", WLMAKER_ACTION_WINDOW_ATTRIBUTES),
     BSPL_ENUM("WindowTileLeft", WLMAKER_ACTION_WINDOW_TILE_LEFT),
     BSPL_ENUM("WindowTileRight", WLMAKER_ACTION_WINDOW_TILE_RIGHT),
     BSPL_ENUM("WindowTileTop", WLMAKER_ACTION_WINDOW_TILE_TOP),
@@ -304,6 +305,29 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
             server_ptr->monitor_ptr,
             bs_subprocess_create_cmdline(arg_ptr));
         break;
+
+    case WLMAKER_ACTION_WINDOW_ATTRIBUTES: {
+        // Opens the attributes inspector (Config.plist AttributesCommand,
+        // wmaker-next-settings by default) for the window's application.
+        workspace_ptr = wlmtk_root_get_current_workspace(server_ptr->root_ptr);
+        window_ptr = wlmtk_workspace_get_activated_window(workspace_ptr);
+        if (NULL == window_ptr) break;
+        const char *cmd_ptr = bspl_dict_get_string_value(
+            server_ptr->config_dict_ptr, "AttributesCommand");
+        const char *app_id_ptr = wlmtk_window_get_app_id(window_ptr);
+        const char *title_ptr = wlmtk_window_get_title(window_ptr);
+        // App ID & title come from the client: Arguments, never shell code.
+        argv = (const char*[]){
+            "/bin/sh", "-c", "exec \"$0\" --attributes \"$1\" \"$2\"",
+            NULL != cmd_ptr ? cmd_ptr : "wmaker-next-settings",
+            NULL != app_id_ptr ? app_id_ptr : "",
+            NULL != title_ptr ? title_ptr : "",
+            NULL };
+        wlmaker_subprocess_monitor_run(
+            server_ptr->monitor_ptr,
+            bs_subprocess_create(argv[0], argv, NULL));
+        break;
+    }
 
     case WLMAKER_ACTION_WORKSPACE_TO_PREVIOUS:
         wlmtk_root_switch_to_previous_workspace(server_ptr->root_ptr);

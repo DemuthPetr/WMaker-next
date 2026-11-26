@@ -224,6 +224,9 @@ void _handle_window_mapped(struct wl_listener *listener_ptr, void *data_ptr)
         window_ptr);
     if (NULL == client_ptr || 0 == client_ptr->pid) return;
     if (NULL != _wlmaker_foreign_toplevel_find(ft_ptr, window_ptr)) return;
+    // Not in the window list: Neither in the taskbar.
+    if (wlmtk_window_get_attributes(window_ptr) &
+        WLMTK_WINDOW_ATTR_SKIP_WINDOW_LIST) return;
 
     wlmaker_foreign_toplevel_handle_t *h_ptr = logged_calloc(
         1, sizeof(wlmaker_foreign_toplevel_handle_t));

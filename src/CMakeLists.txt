@@ -98,6 +98,7 @@ target_sources(wlmaker_lib PRIVATE
   xdg_popup.c
   xdg_shell.c
   window_list.c
+  window_rules.c
   xdg_toplevel.c
   xwl.c
   xwl_surface.c

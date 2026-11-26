@@ -429,6 +429,43 @@ void wlmtk_window_request_shaded(wlmtk_window_t *window_ptr, bool shaded);
 /** @return whether the window currently is shaded. */
 bool wlmtk_window_is_shaded(wlmtk_window_t *window_ptr);
 
+/** Per-window attributes, as set by per-application rules. */
+typedef enum {
+    /** No title bar (server-side decorated windows). */
+    WLMTK_WINDOW_ATTR_NO_TITLEBAR = UINT32_C(1) << 0,
+    /** No resize bar. */
+    WLMTK_WINDOW_ATTR_NO_RESIZEBAR = UINT32_C(1) << 1,
+    /** No border. */
+    WLMTK_WINDOW_ATTR_NO_BORDER = UINT32_C(1) << 2,
+    /** No close button in the title bar. */
+    WLMTK_WINDOW_ATTR_NO_CLOSE_BUTTON = UINT32_C(1) << 3,
+    /** No miniaturize button in the title bar. */
+    WLMTK_WINDOW_ATTR_NO_MINIATURIZE_BUTTON = UINT32_C(1) << 4,
+    /** Not listed in the window list, nor the taskbar. */
+    WLMTK_WINDOW_ATTR_SKIP_WINDOW_LIST = UINT32_C(1) << 5,
+    /** Skipped when cycling windows (Alt+Tab). */
+    WLMTK_WINDOW_ATTR_SKIP_SWITCHER = UINT32_C(1) << 6,
+    /** Never takes the keyboard focus. */
+    WLMTK_WINDOW_ATTR_NO_FOCUS = UINT32_C(1) << 7,
+} wlmtk_window_attribute_t;
+
+/**
+ * Sets the window's attributes (and re-applies its decoration).
+ *
+ * @param window_ptr
+ * @param attributes          Bitmask of @ref wlmtk_window_attribute_t.
+ */
+void wlmtk_window_set_attributes(wlmtk_window_t *window_ptr, uint32_t attributes);
+
+/** @return The window's attributes, see @ref wlmtk_window_attribute_t. */
+uint32_t wlmtk_window_get_attributes(wlmtk_window_t *window_ptr);
+
+/** Marks the window as handled by start rules (start maximized, ...). */
+void wlmtk_window_set_rules_applied(wlmtk_window_t *window_ptr, bool applied);
+
+/** @return whether start rules were applied to the window already. */
+bool wlmtk_window_rules_applied(wlmtk_window_t *window_ptr);
+
 /** @return whether the window can be resized (eg. tiled). */
 bool wlmtk_window_is_resizable(wlmtk_window_t *window_ptr);
 
