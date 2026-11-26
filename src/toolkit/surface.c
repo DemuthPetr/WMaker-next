@@ -60,6 +60,8 @@ struct _wlmtk_surface_t {
     struct wlr_scene_tree     *wlr_scene_tree_ptr;
     /** Listener for the `destroy` signal of `wlr_scene_tree_ptr->node`. */
     struct wl_listener        wlr_scene_tree_node_destroy_listener;
+    /** Set once wlroots destroyed the scene tree: The surface is gone. */
+    bool                      wlr_scene_tree_lost;
 
     /** Committed width of the surface, in pixels. */
     int                       committed_width;
@@ -446,6 +448,11 @@ struct wlr_scene_node *_wlmtk_surface_element_create_scene_node(
         element_ptr, wlmtk_surface_t, super_element);
     BS_ASSERT(NULL == surface_ptr->wlr_scene_tree_ptr);
 
+    if (surface_ptr->wlr_scene_tree_lost) {
+        // The client destroyed the surface already: An empty placeholder,
+        // until the element itself goes.
+        return &wlr_scene_tree_create(wlr_scene_tree_ptr)->node;
+    }
     if (NULL != surface_ptr->wlr_xdg_surface_ptr) {
         surface_ptr->wlr_scene_tree_ptr = wlr_scene_xdg_surface_create(
             wlr_scene_tree_ptr, surface_ptr->wlr_xdg_surface_ptr);
@@ -657,6 +664,9 @@ void _wlmtk_surface_handle_wlr_scene_tree_node_destroy(
     wlmtk_surface_t *surface_ptr = BS_CONTAINER_OF(
         listener_ptr, wlmtk_surface_t, wlr_scene_tree_node_destroy_listener);
     surface_ptr->wlr_scene_tree_ptr = NULL;
+    // Destroyed by wlroots (surface gone), unless the element detached it.
+    surface_ptr->wlr_scene_tree_lost =
+        NULL != surface_ptr->super_element.wlr_scene_node_ptr;
     wlmtk_util_disconnect_listener(&surface_ptr->wlr_scene_tree_node_destroy_listener);
 }
 

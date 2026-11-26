@@ -180,8 +180,10 @@ void wlmtk_element_attach_to_scene_graph(
     if (NULL == parent_wlr_scene_tree_ptr) {
         if (NULL != element_ptr->wlr_scene_node_ptr) {
             wlmtk_util_disconnect_listener(&element_ptr->wlr_scene_node_destroy_listener);
-            wlr_scene_node_destroy(element_ptr->wlr_scene_node_ptr);
+            // Cleared first: Destroy listeners see it's us destroying it.
+            struct wlr_scene_node *node_ptr = element_ptr->wlr_scene_node_ptr;
             element_ptr->wlr_scene_node_ptr = NULL;
+            wlr_scene_node_destroy(node_ptr);
         }
         return;
     }
@@ -419,7 +421,11 @@ void _wlmtk_element_layout(__UNUSED__ wlmtk_element_t *element_ptr)
 /**
  * Handles the 'destroy' callback of the wlr_scene_node.
  *
- * A call here indicates that teardown was not executed properly!
+ * The element destroys its node itself; a call here means someone else did:
+ * wlroots, for the scene tree of a surface the client destroyed before we
+ * unmapped it (seen with VLC). Forget the node -- the surface's own destroy
+ * event follows, and cleans up the element. Crashing the session over the
+ * order of a client's teardown would be worse.
  *
  * @param listener_ptr
  * @param data_ptr
@@ -430,7 +436,10 @@ void handle_wlr_scene_node_destroy(
 {
     wlmtk_element_t *element_ptr = BS_CONTAINER_OF(
         listener_ptr, wlmtk_element_t, wlr_scene_node_destroy_listener);
-    bs_log(BS_FATAL, "Unexpected call into node's dtor on %p!", element_ptr);
+    bs_log(BS_WARNING, "Element %p: Scene node %p destroyed from elsewhere.",
+           element_ptr, element_ptr->wlr_scene_node_ptr);
+    wlmtk_util_disconnect_listener(&element_ptr->wlr_scene_node_destroy_listener);
+    element_ptr->wlr_scene_node_ptr = NULL;
 }
 
 /* == Fake element, useful for unit tests. ================================= */
@@ -666,6 +675,7 @@ void fake_layout(wlmtk_element_t *element_ptr)
 
 static void test_init_fini(bs_test_t *test_ptr);
 static void test_set_parent_container(bs_test_t *test_ptr);
+static void test_external_node_destroy(bs_test_t *test_ptr);
 static void test_set_get_position(bs_test_t *test_ptr);
 static void test_get_dimensions(bs_test_t *test_ptr);
 static void test_pointer_motion(bs_test_t *test_ptr);
@@ -679,6 +689,7 @@ static void test_layout(bs_test_t *test_ptr);
 static const bs_test_case_t _wlmtk_element_test_cases[] = {
     { 1, "init_fini", test_init_fini },
     { 1, "set_parent_container", test_set_parent_container },
+    { 1, "external_node_destroy", test_external_node_destroy },
     { 1, "set_get_position", test_set_get_position },
     { 1, "get_dimensions", test_get_dimensions },
     { 1, "pointer_motion", test_pointer_motion },
@@ -704,6 +715,39 @@ void test_init_fini(bs_test_t *test_ptr)
 
     wlmtk_element_fini(&element);
     BS_TEST_VERIFY_EQ(test_ptr, NULL, element.vmt.destroy);
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * The node destroyed by someone else (wlroots, when a client destroys its
+ * surface first): The element forgets it, and detaches & re-attaches fine.
+ */
+void test_external_node_destroy(bs_test_t *test_ptr)
+{
+    wlmtk_element_t element;
+    BS_TEST_VERIFY_TRUE(test_ptr, wlmtk_element_init(&element));
+    wlmtk_element_extend(&element, &fake_element_vmt);
+    wlmtk_container_t *parent_ptr = wlmtk_container_create_fake_parent();
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, parent_ptr);
+
+    wlmtk_element_set_parent_container(&element, parent_ptr);
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, element.wlr_scene_node_ptr);
+    wlr_scene_node_destroy(element.wlr_scene_node_ptr);
+    BS_TEST_VERIFY_EQ(test_ptr, NULL, element.wlr_scene_node_ptr);
+
+    // Position & visibility still work, without a node.
+    wlmtk_element_set_position(&element, 5, 6);
+    wlmtk_element_set_visible(&element, true);
+
+    // Detaching has nothing to destroy; re-attaching creates a new node.
+    wlmtk_element_set_parent_container(&element, NULL);
+    BS_TEST_VERIFY_EQ(test_ptr, NULL, element.wlr_scene_node_ptr);
+    wlmtk_element_set_parent_container(&element, parent_ptr);
+    BS_TEST_VERIFY_NEQ(test_ptr, NULL, element.wlr_scene_node_ptr);
+    wlmtk_element_set_parent_container(&element, NULL);
+
+    wlmtk_container_destroy_fake_parent(parent_ptr);
+    wlmtk_element_fini(&element);
 }
 
 /* ------------------------------------------------------------------------- */
