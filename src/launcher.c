@@ -21,6 +21,8 @@
 
 #include "launcher.h"
 
+#include <stdio.h>
+
 #include <cairo.h>
 #include <libbase/libbase.h>
 #include <libbase/plist.h>
@@ -38,6 +40,7 @@
 #include "action.h"
 #include "server.h"
 #include "popup_menu.h"
+#include "tooltip.h"
 #include "toolkit/toolkit.h"
 
 /* == Declarations ========================================================= */
@@ -95,6 +98,12 @@ struct _wlmaker_launcher_t {
     bspl_dict_t               *dict_ptr;
     /** Path to the icon. */
     char                      *icon_path_ptr;
+    /** Name, for the tooltip. Optional. */
+    char                      *name_ptr;
+    /** Listener for the tile's pointer_enter: Schedules the tooltip. */
+    struct wl_listener        pointer_enter_listener;
+    /** Listener for the tile's pointer_leave: Hides the tooltip. */
+    struct wl_listener        pointer_leave_listener;
 
     /** Resolved icon path. */
     char                      *resolved_icon_path_ptr;
@@ -123,6 +132,8 @@ static const bspl_desc_t _wlmaker_launcher_plist_desc[] = {
         "Lock", false, wlmaker_launcher_t, locked, locked, false),
     BSPL_DESC_STRING(
         "Icon", true, wlmaker_launcher_t, icon_path_ptr, icon_path_ptr, ""),
+    BSPL_DESC_STRING(
+        "Name", false, wlmaker_launcher_t, name_ptr, name_ptr, ""),
     BSPL_DESC_SENTINEL(),
 };
 
@@ -146,6 +157,12 @@ static void _wlmaker_launcher_pointer_grab_cancel(
 static void _wlmaker_launcher_drop_idle(void *data_ptr);
 
 static void _wlmaker_launcher_start(wlmaker_launcher_t *launcher_ptr);
+static void _wlmaker_launcher_handle_pointer_enter(
+    struct wl_listener *listener_ptr,
+    void *data_ptr);
+static void _wlmaker_launcher_handle_pointer_leave(
+    struct wl_listener *listener_ptr,
+    void *data_ptr);
 
 static void _wlmaker_launcher_handle_terminated(
     void *userdata_ptr,
@@ -246,6 +263,14 @@ wlmaker_launcher_t *wlmaker_launcher_create_from_plist(
         wlmaker_launcher_destroy(launcher_ptr);
         return NULL;
     }
+    wlmtk_util_connect_listener_signal(
+        &wlmtk_tile_element(&launcher_ptr->super_tile)->events.pointer_enter,
+        &launcher_ptr->pointer_enter_listener,
+        _wlmaker_launcher_handle_pointer_enter);
+    wlmtk_util_connect_listener_signal(
+        &wlmtk_tile_element(&launcher_ptr->super_tile)->events.pointer_leave,
+        &launcher_ptr->pointer_leave_listener,
+        _wlmaker_launcher_handle_pointer_leave);
 
     // Resolves to a full path, and verifies the icon file exists.
     char *p = bs_strdupf("icons/%s", launcher_ptr->icon_path_ptr);
@@ -295,6 +320,13 @@ wlmaker_launcher_t *wlmaker_launcher_create_from_plist(
 /* ------------------------------------------------------------------------- */
 void wlmaker_launcher_destroy(wlmaker_launcher_t *launcher_ptr)
 {
+    wlmaker_tooltip_hide(launcher_ptr);
+    wlmtk_util_disconnect_listener(&launcher_ptr->pointer_leave_listener);
+    wlmtk_util_disconnect_listener(&launcher_ptr->pointer_enter_listener);
+    if (NULL != launcher_ptr->name_ptr) {
+        free(launcher_ptr->name_ptr);
+        launcher_ptr->name_ptr = NULL;
+    }
     if (NULL != launcher_ptr->server_ptr) {
         wlmaker_popup_menu_cancel(launcher_ptr->server_ptr->popup_menu_ptr,
                                   launcher_ptr);
@@ -591,6 +623,7 @@ bool _wlmaker_launcher_pointer_button(
     wlmaker_launcher_t *launcher_ptr = BS_CONTAINER_OF(
         element_ptr, wlmaker_launcher_t,
         super_tile.super_container.super_element);
+    wlmaker_tooltip_hide(launcher_ptr);
 
     // Right click: The dock's menu. Middle click: The alternate command.
     if (BTN_RIGHT == button_event_ptr->button &&
@@ -939,6 +972,84 @@ bool _wlmaker_launcher_set_content_size(
     wlmtk_image_destroy(launcher_ptr->image_ptr);
     launcher_ptr->image_ptr = image_ptr;
     return true;
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Derives a name from the command line: The `Name=` of the desktop entry
+ * that the last argument names, if it is a ".desktop" file; else the
+ * basename of the program.
+ */
+static void _wlmaker_launcher_name_from_cmdline(
+    const char *cmdline_ptr,
+    char *buf_ptr,
+    size_t size)
+{
+    const char *c = cmdline_ptr;
+    while (' ' == *c) ++c;
+    size_t len = strcspn(c, " ");
+    const char *b = c;
+    for (const char *p = c; p < c + len; ++p) if ('/' == *p) b = p + 1;
+    snprintf(buf_ptr, size, "%.*s", (int)(c + len - b), b);
+
+    const char *last_ptr = strrchr(cmdline_ptr, ' ');
+    last_ptr = (NULL != last_ptr) ? last_ptr + 1 : cmdline_ptr;
+    size_t n = strlen(last_ptr);
+    if (8 >= n || 0 != strcmp(last_ptr + n - 8, ".desktop")) return;
+
+    FILE *f = fopen(last_ptr, "r");
+    if (NULL == f) return;
+    char line[512];
+    bool in_entry = false;
+    while (NULL != fgets(line, sizeof(line), f)) {
+        if ('[' == line[0]) {
+            in_entry = (0 == strncmp(line, "[Desktop Entry]", 15));
+            continue;
+        }
+        if (in_entry && 0 == strncmp(line, "Name=", 5)) {
+            line[strcspn(line, "\r\n")] = '\0';
+            snprintf(buf_ptr, size, "%.*s", (int)(size - 1), line + 5);
+            break;
+        }
+    }
+    fclose(f);
+}
+
+/* ------------------------------------------------------------------------- */
+/** Pointer entered the tile: Schedules the tooltip with the launcher's name. */
+void _wlmaker_launcher_handle_pointer_enter(
+    struct wl_listener *listener_ptr,
+    __UNUSED__ void *data_ptr)
+{
+    wlmaker_launcher_t *launcher_ptr = BS_CONTAINER_OF(
+        listener_ptr, wlmaker_launcher_t, pointer_enter_listener);
+    if (launcher_ptr->pressed || launcher_ptr->dragging) return;
+
+    // The name; else the action; else the desktop entry's name, for a
+    // command that runs one (eg. "dex app.desktop"); else the program name.
+    char text[128] = "";
+    if (NULL != launcher_ptr->name_ptr && 0 < strlen(launcher_ptr->name_ptr)) {
+        snprintf(text, sizeof(text), "%s", launcher_ptr->name_ptr);
+    } else if (NULL != launcher_ptr->action_ptr &&
+               0 < strlen(launcher_ptr->action_ptr)) {
+        snprintf(text, sizeof(text), "%s", launcher_ptr->action_ptr);
+    } else if (NULL != launcher_ptr->cmdline_ptr) {
+        _wlmaker_launcher_name_from_cmdline(
+            launcher_ptr->cmdline_ptr, text, sizeof(text));
+    }
+    wlmaker_tooltip_show(launcher_ptr, text,
+                         wlmtk_tile_element(&launcher_ptr->super_tile));
+}
+
+/* ------------------------------------------------------------------------- */
+/** Pointer left the tile: Hides the tooltip. */
+void _wlmaker_launcher_handle_pointer_leave(
+    struct wl_listener *listener_ptr,
+    __UNUSED__ void *data_ptr)
+{
+    wlmaker_launcher_t *launcher_ptr = BS_CONTAINER_OF(
+        listener_ptr, wlmaker_launcher_t, pointer_leave_listener);
+    wlmaker_tooltip_hide(launcher_ptr);
 }
 
 /* == Unit tests =========================================================== */

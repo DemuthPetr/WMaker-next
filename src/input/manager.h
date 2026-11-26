@@ -127,6 +127,17 @@ wlmim_t *wlmim_input_manager_create(
     wlmtk_root_t *root_ptr);
 
 /**
+ * Adds an input device that didn't come from the backend; eg. a virtual
+ * pointer. As for the backend's `new_input` signal.
+ *
+ * @param input_manager_ptr
+ * @param wlr_input_device_ptr
+ */
+void wlmim_add_input_device(
+    wlmim_t *input_manager_ptr,
+    struct wlr_input_device *wlr_input_device_ptr);
+
+/**
  * Destroys the input manager.
  *
  * @param input_manager_ptr

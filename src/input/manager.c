@@ -233,6 +233,16 @@ wlmim_t *wlmim_input_manager_create(
 }
 
 /* ------------------------------------------------------------------------- */
+void wlmim_add_input_device(
+    wlmim_t *input_manager_ptr,
+    struct wlr_input_device *wlr_input_device_ptr)
+{
+    _wlmim_handle_new_input_device(
+        &input_manager_ptr->backend_new_input_device_listener,
+        wlr_input_device_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
 void wlmim_input_manager_destroy(wlmim_t *input_manager_ptr)
 {
     bs_dllist_for_each(

@@ -21,8 +21,10 @@
 
 #include "workspace.h"
 
+#include <cairo.h>
 #include <libbase/libbase.h>
 #include <linux/input-event-codes.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <wayland-server-core.h>
 #include <wayland-util.h>
@@ -36,8 +38,10 @@
 #include <wlr/version.h>
 #undef WLR_USE_UNSTABLE
 
+#include "buffer.h"
 #include "container.h"
 #include "behavior.h"
+#include "gfxbuf.h"  // IWYU pragma: keep
 #include "effects.h"
 #include "rectangle.h"
 #include "fsm.h"
@@ -134,6 +138,8 @@ struct _wlmtk_workspace_t {
 
     /** Preview of where a dragged window will snap to. NULL if none. */
     wlmtk_rectangle_t         *snap_preview_ptr;
+    /** Geometry info box shown while moving or resizing. NULL if hidden. */
+    wlmtk_buffer_t            *geometry_ptr;
     /** Edges the dragged window will snap to, on release. */
     uint32_t                  snap_edges;
     /** Whether the dragged window will be maximized, on release. */
@@ -186,6 +192,9 @@ static void _wlmtk_workspace_show_animation_done(
 static double _wlmtk_workspace_target_opacity(wlmtk_window_t *window_ptr);
 static bool _wlmtk_workspace_skip_cycling(wlmtk_window_t *window_ptr);
 
+static void _wlmtk_workspace_show_geometry(
+    wlmtk_workspace_t *workspace_ptr,
+    const char *text_ptr);
 static bool pfsm_move_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
 static bool pfsm_move_motion(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
 static bool pfsm_resize_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
@@ -376,6 +385,8 @@ void wlmtk_workspace_destroy(wlmtk_workspace_t *workspace_ptr)
 {
     wlmtk_behavior_cancel_raise(workspace_ptr);
     _wlmtk_workspace_set_snap_preview(workspace_ptr, NULL, 0, false);
+    workspace_ptr->grabbed_window_ptr = NULL;
+    _wlmtk_workspace_show_geometry(workspace_ptr, NULL);
     wlmtk_util_disconnect_listener(
         &workspace_ptr->output_layout_change_listener);
 
@@ -1593,6 +1604,11 @@ bool pfsm_move_motion(wlmtk_fsm_t *fsm_ptr, __UNUSED__ void *ud_ptr)
         workspace_ptr->grabbed_window_ptr,
         workspace_ptr->initial_x + rel_x,
         workspace_ptr->initial_y + rel_y);
+    char text[32];
+    snprintf(text, sizeof(text), "%+d %+d",
+             (int)(workspace_ptr->initial_x + rel_x),
+             (int)(workspace_ptr->initial_y + rel_y));
+    _wlmtk_workspace_show_geometry(workspace_ptr, text);
 
     // Snapping: Pointer at an edge (half) or corner (quarter) of its output.
     const wlmtk_behavior_t *b_ptr = wlmtk_behavior_get();
@@ -1686,6 +1702,94 @@ void _wlmtk_workspace_set_snap_preview(
 }
 
 /* ------------------------------------------------------------------------- */
+/**
+ * Shows `text_ptr` in a small box at the center of the grabbed window, as
+ * Window Maker's move & resize info. NULL, or behavior's `show_geometry`
+ * off: Hides it.
+ */
+void _wlmtk_workspace_show_geometry(
+    wlmtk_workspace_t *workspace_ptr,
+    const char *text_ptr)
+{
+    if (NULL == text_ptr || NULL == workspace_ptr->grabbed_window_ptr ||
+        !wlmtk_behavior_get()->show_geometry) {
+        if (NULL != workspace_ptr->geometry_ptr) {
+            wlmtk_element_t *e = wlmtk_buffer_element(
+                workspace_ptr->geometry_ptr);
+            if (NULL != e->parent_container_ptr) {
+                wlmtk_container_remove_element(e->parent_container_ptr, e);
+            }
+            wlmtk_buffer_fini(workspace_ptr->geometry_ptr);
+            free(workspace_ptr->geometry_ptr);
+            workspace_ptr->geometry_ptr = NULL;
+        }
+        return;
+    }
+
+    // Measure the text, to size the box.
+    cairo_surface_t *s_ptr = cairo_image_surface_create(
+        CAIRO_FORMAT_ARGB32, 1, 1);
+    cairo_t *c_ptr = cairo_create(s_ptr);
+    cairo_select_font_face(c_ptr, "sans-serif", CAIRO_FONT_SLANT_NORMAL,
+                           CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(c_ptr, 13);
+    cairo_text_extents_t extents;
+    cairo_text_extents(c_ptr, text_ptr, &extents);
+    cairo_destroy(c_ptr);
+    cairo_surface_destroy(s_ptr);
+    int w = (int)extents.x_advance + 20, h = 24;
+
+    struct wlr_buffer *wlr_buffer_ptr = bs_gfxbuf_create_wlr_buffer(w, h);
+    if (NULL == wlr_buffer_ptr) return;
+    c_ptr = cairo_create_from_wlr_buffer(wlr_buffer_ptr);
+    if (NULL == c_ptr) {
+        wlr_buffer_drop(wlr_buffer_ptr);
+        return;
+    }
+    cairo_set_source_rgba(c_ptr, 0.13, 0.13, 0.13, 0.9);
+    cairo_paint(c_ptr);
+    cairo_set_source_rgba(c_ptr, 0.6, 0.6, 0.6, 1.0);
+    cairo_set_line_width(c_ptr, 1.0);
+    cairo_rectangle(c_ptr, 0.5, 0.5, w - 1, h - 1);
+    cairo_stroke(c_ptr);
+    cairo_select_font_face(c_ptr, "sans-serif", CAIRO_FONT_SLANT_NORMAL,
+                           CAIRO_FONT_WEIGHT_BOLD);
+    cairo_set_font_size(c_ptr, 13);
+    cairo_set_source_rgba(c_ptr, 1.0, 1.0, 1.0, 1.0);
+    cairo_move_to(c_ptr, 10, h / 2.0 - extents.y_bearing - extents.height / 2);
+    cairo_show_text(c_ptr, text_ptr);
+    cairo_destroy(c_ptr);
+
+    if (NULL == workspace_ptr->geometry_ptr) {
+        workspace_ptr->geometry_ptr = logged_calloc(1, sizeof(wlmtk_buffer_t));
+        if (NULL == workspace_ptr->geometry_ptr) {
+            wlr_buffer_drop(wlr_buffer_ptr);
+            return;
+        }
+        if (!wlmtk_buffer_init(workspace_ptr->geometry_ptr)) {
+            free(workspace_ptr->geometry_ptr);
+            workspace_ptr->geometry_ptr = NULL;
+            wlr_buffer_drop(wlr_buffer_ptr);
+            return;
+        }
+        wlmtk_element_t *e = wlmtk_buffer_element(workspace_ptr->geometry_ptr);
+        wlmtk_container_add_element(&workspace_ptr->super_container, e);
+        wlmtk_element_set_visible(e, true);
+    }
+    wlmtk_buffer_set(workspace_ptr->geometry_ptr, wlr_buffer_ptr);
+    wlr_buffer_drop(wlr_buffer_ptr);
+
+    int x, y;
+    wlmtk_element_get_position(
+        wlmtk_window_element(workspace_ptr->grabbed_window_ptr), &x, &y);
+    struct wlr_box box = wlmtk_window_get_size(
+        workspace_ptr->grabbed_window_ptr);
+    wlmtk_element_set_position(
+        wlmtk_buffer_element(workspace_ptr->geometry_ptr),
+        x + (box.width - w) / 2, y + (box.height - h) / 2);
+}
+
+/* ------------------------------------------------------------------------- */
 /** Initiates a resize. */
 bool pfsm_resize_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr)
 {
@@ -1755,6 +1859,9 @@ bool pfsm_resize_motion(wlmtk_fsm_t *fsm_ptr, __UNUSED__ void *ud_ptr)
     };
     wlmtk_window_request_size(
         workspace_ptr->grabbed_window_ptr, &box);
+    char text[32];
+    snprintf(text, sizeof(text), "%d x %d", box.width, box.height);
+    _wlmtk_workspace_show_geometry(workspace_ptr, text);
     return true;
 }
 
@@ -1765,6 +1872,7 @@ bool pfsm_reset(wlmtk_fsm_t *fsm_ptr, __UNUSED__ void *ud_ptr)
     wlmtk_workspace_t *workspace_ptr = BS_CONTAINER_OF(
         fsm_ptr, wlmtk_workspace_t, fsm);
     _wlmtk_workspace_set_snap_preview(workspace_ptr, NULL, 0, false);
+    _wlmtk_workspace_show_geometry(workspace_ptr, NULL);
 
     wlmtk_window_set_resize_edges(workspace_ptr->grabbed_window_ptr, 0);
 

@@ -36,6 +36,7 @@ static wlmtk_behavior_t _wlmtk_behavior = {
     .snapping = true,
     .snap_distance = 8,
     .snap_top_maximizes = true,
+    .show_geometry = true,
 };
 /** Event loop, for the auto-raise timer. */
 static struct wl_event_loop *_wlmtk_behavior_loop_ptr;

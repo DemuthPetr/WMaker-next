@@ -54,6 +54,17 @@ void wlmaker_xdg_toplevel_set_server_side_decorated(
     struct wlmaker_xdg_toplevel *wlmaker_xdg_toplevel_ptr,
     bool server_side_decorated);
 
+/**
+ * Returns the window of the XDG toplevel that `wlr_surface_ptr` belongs to.
+ *
+ * @param wlr_surface_ptr     A toplevel's surface, or one of its subsurfaces.
+ *
+ * @return The window, or NULL if the surface is not (part of) an XDG
+ *     toplevel handled by wlmaker.
+ */
+wlmtk_window_t *wlmaker_xdg_toplevel_window_from_wlr_surface(
+    struct wlr_surface *wlr_surface_ptr);
+
 /** Unit test set. */
 extern const bs_test_set_t wlmaker_xdg_toplevel_test_set;
 

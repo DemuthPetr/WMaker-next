@@ -113,6 +113,14 @@ struct _wlmaker_server_t {
         *wlr_primary_selection_v1_device_manager_ptr;
     /** Listener to approve primary selection requests. */
     struct wl_listener        request_set_primary_selection_listener;
+    /** xdg-activation-v1: Lets a client activate a (its own) window. */
+    struct wlr_xdg_activation_v1 *wlr_xdg_activation_ptr;
+    /** Listener for `request_activate` of the xdg-activation manager. */
+    struct wl_listener        xdg_activation_request_activate_listener;
+    /** wlr-virtual-pointer: Pointers of clients, eg. remote input. */
+    struct wlr_virtual_pointer_manager_v1 *wlr_virtual_pointer_manager_ptr;
+    /** Listener for `new_virtual_pointer`. */
+    struct wl_listener        new_virtual_pointer_listener;
     /** Enables clipboard managers and tools (wl-copy, wl-paste). */
     struct wlr_data_control_manager_v1 *wlr_data_control_manager_v1_ptr;
 

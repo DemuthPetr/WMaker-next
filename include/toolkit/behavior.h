@@ -72,6 +72,8 @@ typedef struct {
     int                       snap_distance;
     /** Whether snapping to the top edge maximizes (else: top half). */
     bool                      snap_top_maximizes;
+    /** Whether to show position & size while moving or resizing a window. */
+    bool                      show_geometry;
 } wlmtk_behavior_t;
 
 /**

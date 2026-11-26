@@ -37,6 +37,7 @@
 #include <wayland-server-core.h>
 /// Use non-stable features of wlroots.
 #define WLR_USE_UNSTABLE
+#include <wlr/types/wlr_scene.h>
 #include <wlr/util/log.h>
 #undef WLR_USE_UNSTABLE
 
@@ -56,6 +57,7 @@
 #include "task_list.h"
 #include "window_rules.h"
 #include "popup_menu.h"
+#include "tooltip.h"
 #include "toolkit/toolkit.h"
 
 /** Will hold the value of --config_file. */
@@ -191,6 +193,10 @@ typedef struct {
     char            name[32];
     /** Background color. */
     uint32_t        color;
+    /** Wallpaper image (PNG), or empty. */
+    char            image[1024];
+    /** How the wallpaper is fit to the output. */
+    int             image_mode;
 } wlmaker_workspace_style_t;
 
 /** Style descriptor for the "Workspace" dict of wlmaker-state.plist. */
@@ -199,6 +205,11 @@ static const bspl_desc_t wlmaker_workspace_style_desc[] = {
         "Name", true, wlmaker_workspace_style_t, name, name, 32, NULL),
     BSPL_DESC_ARGB32(
         "Color", false, wlmaker_workspace_style_t, color, color, 0),
+    BSPL_DESC_CHARBUF(
+        "Image", false, wlmaker_workspace_style_t, image, image, 1024, ""),
+    BSPL_DESC_ENUM(
+        "ImageMode", false, wlmaker_workspace_style_t, image_mode, image_mode,
+        WLMAKER_BACKGROUND_FILL, wlmaker_background_mode_desc),
     BSPL_DESC_SENTINEL()
 };
 
@@ -333,6 +344,8 @@ typedef struct {
     int64_t                   snap_distance;
     /** Snapping to the top edge maximizes. */
     bool                      snap_top_maximizes;
+    /** Show position & size while moving or resizing. */
+    bool                      show_geometry;
 } _wlmaker_windows_config_t;
 
 /** Decoder for the "Windows" dict of the configuration. */
@@ -351,6 +364,8 @@ static const bspl_desc_t _wlmaker_windows_desc[] = {
                     snap_distance, snap_distance, 8),
     BSPL_DESC_BOOL("SnapTopMaximizes", false, _wlmaker_windows_config_t,
                    snap_top_maximizes, snap_top_maximizes, true),
+    BSPL_DESC_BOOL("ShowGeometry", false, _wlmaker_windows_config_t,
+                   show_geometry, show_geometry, true),
     BSPL_DESC_SENTINEL()
 };
 
@@ -363,7 +378,8 @@ static void _wlmaker_apply_windows(
     _wlmaker_windows_config_t wc = {
         .focus_mode = WLMTK_FOCUS_CLICK, .raise_delay_ms = -1,
         .placement = WLMTK_PLACEMENT_SMART, .snapping = true,
-        .snap_distance = 8, .snap_top_maximizes = true };
+        .snap_distance = 8, .snap_top_maximizes = true,
+        .show_geometry = true };
     bspl_dict_t *dict_ptr = bspl_dict_get_dict(config_dict_ptr, "Windows");
     if (NULL != dict_ptr &&
         !bspl_decode_dict(dict_ptr, _wlmaker_windows_desc, &wc)) {
@@ -371,7 +387,8 @@ static void _wlmaker_apply_windows(
         wc = (_wlmaker_windows_config_t){
             .focus_mode = WLMTK_FOCUS_CLICK, .raise_delay_ms = -1,
             .placement = WLMTK_PLACEMENT_SMART, .snapping = true,
-            .snap_distance = 8, .snap_top_maximizes = true };
+            .snap_distance = 8, .snap_top_maximizes = true,
+        .show_geometry = true };
     }
     wlmtk_behavior_t behavior = {
         .focus_mode = (wlmtk_focus_mode_t)wc.focus_mode,
@@ -380,6 +397,7 @@ static void _wlmaker_apply_windows(
         .snapping = wc.snapping,
         .snap_distance = (int)wc.snap_distance,
         .snap_top_maximizes = wc.snap_top_maximizes,
+        .show_geometry = wc.show_geometry,
     };
     wlmtk_behavior_set(&behavior,
                        wl_display_get_event_loop(server_ptr->wl_display_ptr));
@@ -620,6 +638,24 @@ static int _wlmaker_handle_sighup(
 }
 
 /* ------------------------------------------------------------------------- */
+/** Applies the workspace's wallpaper. "~/" in the path is expanded. */
+static void _wlmaker_set_wallpaper(
+    bs_dllist_node_t *bg_dlnode_ptr,
+    const wlmaker_workspace_style_t *s_ptr)
+{
+    char *path_ptr = NULL;
+    if (0 < strlen(s_ptr->image)) {
+        path_ptr = bs_file_resolve_path(s_ptr->image, NULL);
+        if (NULL == path_ptr) {
+            bs_log(BS_WARNING, "Wallpaper \"%s\" not found.", s_ptr->image);
+        }
+    }
+    wlmaker_background_dlnode_set_image(
+        bg_dlnode_ptr, path_ptr, s_ptr->image_mode);
+    free(path_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
 /** Adds a workspace with the given name & color (0: the theme's). */
 static bool _wlmaker_add_workspace(
     wlmaker_server_t *server_ptr,
@@ -647,6 +683,7 @@ static bool _wlmaker_add_workspace(
         return false;
     }
     bs_dllist_push_back(&server_ptr->backgrounds, bg_dlnode_ptr);
+    _wlmaker_set_wallpaper(bg_dlnode_ptr, s_ptr);
     wlmtk_root_add_workspace(server_ptr->root_ptr, workspace_ptr);
     return true;
 }
@@ -725,6 +762,7 @@ static void _wlmaker_reload_workspaces(
         if (0 == s.color) s.color = server_ptr->style_ptr->background_color;
         if (NULL != bg_dlnode_ptr) {
             wlmaker_background_dlnode_set_color(bg_dlnode_ptr, &s.color);
+            _wlmaker_set_wallpaper(bg_dlnode_ptr, &s);
             bg_dlnode_ptr = bg_dlnode_ptr->next_ptr;
         }
         ws_dlnode_ptr = ws_dlnode_ptr->next_ptr;
@@ -953,6 +991,12 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     if (NULL == server_ptr->popup_menu_ptr) {
         return EXIT_FAILURE;
     }
+    if (!wlmaker_tooltip_init(
+            wl_display_get_event_loop(server_ptr->wl_display_ptr),
+            server_ptr->wlr_output_layout_ptr,
+            &server_ptr->wlr_scene_ptr->tree)) {
+        return EXIT_FAILURE;
+    }
 
     wlmaker_action_handle_ptr = wlmaker_action_bind_keys(
         server_ptr,
@@ -1027,6 +1071,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     if (NULL != wlmaker_window_rules_ptr) {
         wlmaker_window_rules_destroy(wlmaker_window_rules_ptr);
     }
+    wlmaker_tooltip_fini();
     if (NULL != server_ptr->popup_menu_ptr) {
         wlmaker_popup_menu_destroy(server_ptr->popup_menu_ptr);
         server_ptr->popup_menu_ptr = NULL;

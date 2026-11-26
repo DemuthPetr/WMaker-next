@@ -28,6 +28,18 @@
 
 struct wlr_output_layout;
 
+/** How a wallpaper image is fit to an output. */
+typedef enum {
+    WLMAKER_BACKGROUND_FILL,     ///< Scaled to cover the output, cropped.
+    WLMAKER_BACKGROUND_SCALE,    ///< Scaled to fit inside, color borders.
+    WLMAKER_BACKGROUND_STRETCH,  ///< Stretched to the output's size.
+    WLMAKER_BACKGROUND_CENTER,   ///< Unscaled, centered.
+    WLMAKER_BACKGROUND_TILE,     ///< Unscaled, repeated from the top left.
+} wlmaker_background_mode_t;
+
+/** Names of @ref wlmaker_background_mode_t, for the "ImageMode" key. */
+extern const bspl_enum_desc_t wlmaker_background_mode_desc[];
+
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
@@ -65,6 +77,18 @@ void wlmaker_background_dlnode_destroy(
 void wlmaker_background_dlnode_set_color(
     bs_dllist_node_t *dlnode_ptr,
     void *ud_ptr);
+
+/**
+ * Sets (or clears) the wallpaper image of this workspace's background.
+ *
+ * @param dlnode_ptr
+ * @param path_ptr            Path to a PNG file. NULL or empty: No image.
+ * @param mode
+ */
+void wlmaker_background_dlnode_set_image(
+    bs_dllist_node_t *dlnode_ptr,
+    const char *path_ptr,
+    wlmaker_background_mode_t mode);
 
 #ifdef __cplusplus
 }  // extern "C"
