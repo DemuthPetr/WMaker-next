@@ -72,6 +72,25 @@ struct _wlmaker_tl_menu_t {
     wlmaker_action_item_t     *move_to_ws_ai_ptr;
     /** Action item for 'close'. */
     wlmaker_action_item_t     *close_ai_ptr;
+    /** Action item for 'Kill': Ends the application's process. */
+    wlmaker_action_item_t     *kill_ai_ptr;
+
+    /** Menu item for attaching the 'Other maximization' submenu. */
+    wlmaker_action_item_t     *tile_ai_ptr;
+    /** The 'Other maximization' submenu: Halves, quarters, center. */
+    wlmtk_menu_t              *tile_submenu_ptr;
+    /** Its items. */
+    wlmaker_action_item_t     *tile_items_ptr[10];
+    /** Menu item for attaching the 'Options' submenu. */
+    wlmaker_action_item_t     *options_ai_ptr;
+    /** The 'Options' submenu: Keep on top, at bottom, on all workspaces. */
+    wlmtk_menu_t              *options_submenu_ptr;
+    /** 'Keep on top' (toggles). */
+    wlmaker_action_item_t     *on_top_ai_ptr;
+    /** 'Keep at bottom' (toggles). */
+    wlmaker_action_item_t     *at_bottom_ai_ptr;
+    /** 'On all workspaces' (toggles). */
+    wlmaker_action_item_t     *omnipresent_ai_ptr;
 };
 
 /** Item holder. */
@@ -150,6 +169,12 @@ static const wlmaker_action_item_desc_t _tl_menu_items[] = {
         offsetof(wlmaker_tl_menu_t, unmaximize_ai_ptr)
     },
     {
+        "Other maximization",
+        WLMAKER_ACTION_NONE,
+        NULL,
+        offsetof(wlmaker_tl_menu_t, tile_ai_ptr)
+    },
+    {
         "Fullscreen",
         WLMAKER_ACTION_WINDOW_TOGGLE_FULLSCREEN,
         NULL,
@@ -176,14 +201,91 @@ static const wlmaker_action_item_desc_t _tl_menu_items[] = {
         offsetof(wlmaker_tl_menu_t, move_to_ws_ai_ptr)
     },
     {
+        "Options",
+        WLMAKER_ACTION_NONE,
+        NULL,
+        offsetof(wlmaker_tl_menu_t, options_ai_ptr)
+    },
+    {
         "Close",
         WLMAKER_ACTION_WINDOW_CLOSE,
         NULL,
         offsetof(wlmaker_tl_menu_t, close_ai_ptr)
 
     },
+    {
+        "Kill",
+        WLMAKER_ACTION_WINDOW_KILL,
+        NULL,
+        offsetof(wlmaker_tl_menu_t, kill_ai_ptr)
+    },
     { NULL, 0, NULL, 0 }  // Sentinel.
 };
+
+/** The 'Other maximization' submenu, as Window Maker's. */
+static const wlmaker_action_item_desc_t _tl_menu_tile_items[] = {
+    { "Left half", WLMAKER_ACTION_WINDOW_TILE_LEFT, NULL,
+      offsetof(wlmaker_tl_menu_t, tile_items_ptr[0]) },
+    { "Right half", WLMAKER_ACTION_WINDOW_TILE_RIGHT, NULL,
+      offsetof(wlmaker_tl_menu_t, tile_items_ptr[1]) },
+    { "Top half", WLMAKER_ACTION_WINDOW_TILE_TOP, NULL,
+      offsetof(wlmaker_tl_menu_t, tile_items_ptr[2]) },
+    { "Bottom half", WLMAKER_ACTION_WINDOW_TILE_BOTTOM, NULL,
+      offsetof(wlmaker_tl_menu_t, tile_items_ptr[3]) },
+    { "Top left", WLMAKER_ACTION_WINDOW_TILE_TOP_LEFT, NULL,
+      offsetof(wlmaker_tl_menu_t, tile_items_ptr[4]) },
+    { "Top right", WLMAKER_ACTION_WINDOW_TILE_TOP_RIGHT, NULL,
+      offsetof(wlmaker_tl_menu_t, tile_items_ptr[5]) },
+    { "Bottom left", WLMAKER_ACTION_WINDOW_TILE_BOTTOM_LEFT, NULL,
+      offsetof(wlmaker_tl_menu_t, tile_items_ptr[6]) },
+    { "Bottom right", WLMAKER_ACTION_WINDOW_TILE_BOTTOM_RIGHT, NULL,
+      offsetof(wlmaker_tl_menu_t, tile_items_ptr[7]) },
+    { "Center", WLMAKER_ACTION_WINDOW_CENTER, NULL,
+      offsetof(wlmaker_tl_menu_t, tile_items_ptr[8]) },
+    { "Restore size", WLMAKER_ACTION_WINDOW_UNTILE, NULL,
+      offsetof(wlmaker_tl_menu_t, tile_items_ptr[9]) },
+    { NULL, 0, NULL, 0 }  // Sentinel.
+};
+
+/** The 'Options' submenu. Texts change with the state, see below. */
+static const wlmaker_action_item_desc_t _tl_menu_options_items[] = {
+    { "Keep on top", WLMAKER_ACTION_WINDOW_TOGGLE_ON_TOP, NULL,
+      offsetof(wlmaker_tl_menu_t, on_top_ai_ptr) },
+    { "Keep at bottom", WLMAKER_ACTION_WINDOW_TOGGLE_AT_BOTTOM, NULL,
+      offsetof(wlmaker_tl_menu_t, at_bottom_ai_ptr) },
+    { "Show on all workspaces", WLMAKER_ACTION_WINDOW_TOGGLE_OMNIPRESENT, NULL,
+      offsetof(wlmaker_tl_menu_t, omnipresent_ai_ptr) },
+    { NULL, 0, NULL, 0 }  // Sentinel.
+};
+
+/* ------------------------------------------------------------------------- */
+/** Creates a submenu with the items of `descs`, attached to `ai_ptr`. */
+static wlmtk_menu_t *_wlmaker_tl_menu_create_submenu(
+    wlmaker_tl_menu_t *tl_menu_ptr,
+    const wlmaker_action_item_desc_t *descs,
+    wlmaker_action_item_t *ai_ptr)
+{
+    wlmaker_server_t *server_ptr = tl_menu_ptr->server_ptr;
+    wlmtk_menu_t *menu_ptr = wlmtk_menu_create(
+        wlmtk_menu_style_to_ref(server_ptr->style_ptr->menu_style_ptr));
+    if (NULL == menu_ptr) return NULL;
+    for (const wlmaker_action_item_desc_t *desc_ptr = descs;
+         NULL != desc_ptr->text_ptr;
+         ++desc_ptr) {
+        wlmaker_action_item_t *item_ptr = wlmaker_action_item_create_from_desc(
+            desc_ptr,
+            tl_menu_ptr,
+            wlmtk_menu_style_to_ref(server_ptr->style_ptr->menu_style_ptr),
+            server_ptr);
+        if (NULL == item_ptr) {
+            bs_log(BS_ERROR, "Failed wlmaker_action_item_create_from_desc()");
+            return menu_ptr;
+        }
+        wlmtk_menu_add_item(menu_ptr, wlmaker_action_item_menu_item(item_ptr));
+    }
+    wlmtk_menu_item_set_submenu(wlmaker_action_item_menu_item(ai_ptr), menu_ptr);
+    return menu_ptr;
+}
 
 /* == Exported methods ===================================================== */
 
@@ -228,6 +330,19 @@ wlmaker_tl_menu_t *wlmaker_tl_menu_create(
     wlmtk_menu_item_set_submenu(
         wlmaker_action_item_menu_item(tl_menu_ptr->move_to_ws_ai_ptr),
         tl_menu_ptr->workspaces_submenu_ptr);
+
+    tl_menu_ptr->tile_submenu_ptr = _wlmaker_tl_menu_create_submenu(
+        tl_menu_ptr, _tl_menu_tile_items, tl_menu_ptr->tile_ai_ptr);
+    tl_menu_ptr->options_submenu_ptr = _wlmaker_tl_menu_create_submenu(
+        tl_menu_ptr, _tl_menu_options_items, tl_menu_ptr->options_ai_ptr);
+    if (NULL == tl_menu_ptr->tile_submenu_ptr ||
+        NULL == tl_menu_ptr->options_submenu_ptr ||
+        NULL == tl_menu_ptr->on_top_ai_ptr ||
+        NULL == tl_menu_ptr->omnipresent_ai_ptr ||
+        NULL == tl_menu_ptr->tile_items_ptr[9]) {
+        wlmaker_tl_menu_destroy(tl_menu_ptr);
+        return NULL;
+    }
 
     // Connect state listener and initialize state.
     wlmtk_util_connect_listener_signal(
@@ -289,6 +404,37 @@ void _wlmaker_tl_menu_handle_window_state_changed(
     wlmtk_menu_item_set_enabled(
         wlmaker_action_item_menu_item(tl_menu_ptr->unmaximize_ai_ptr),
         wlmtk_window_is_maximized(window_ptr));
+
+    // Tiling needs a resizable window; 'Restore size' a tiled one.
+    if (NULL != tl_menu_ptr->tile_ai_ptr) {
+        wlmtk_menu_item_set_enabled(
+            wlmaker_action_item_menu_item(tl_menu_ptr->tile_ai_ptr),
+            wlmtk_window_is_resizable(window_ptr) &&
+            !wlmtk_window_is_fullscreen(window_ptr));
+    }
+    if (NULL != tl_menu_ptr->tile_items_ptr[9]) {
+        wlmtk_menu_item_set_enabled(
+            wlmaker_action_item_menu_item(tl_menu_ptr->tile_items_ptr[9]),
+            0 != wlmtk_window_get_tiled_edges(window_ptr));
+    }
+    if (NULL != tl_menu_ptr->on_top_ai_ptr) {
+        wlmtk_menu_item_set_text(
+            wlmaker_action_item_menu_item(tl_menu_ptr->on_top_ai_ptr),
+            wlmtk_window_is_keep_on_top(window_ptr) ?
+            "Don't keep on top" : "Keep on top");
+    }
+    if (NULL != tl_menu_ptr->at_bottom_ai_ptr) {
+        wlmtk_menu_item_set_text(
+            wlmaker_action_item_menu_item(tl_menu_ptr->at_bottom_ai_ptr),
+            wlmtk_window_is_keep_at_bottom(window_ptr) ?
+            "Don't keep at bottom" : "Keep at bottom");
+    }
+    if (NULL != tl_menu_ptr->omnipresent_ai_ptr) {
+        wlmtk_menu_item_set_text(
+            wlmaker_action_item_menu_item(tl_menu_ptr->omnipresent_ai_ptr),
+            wlmtk_window_is_omnipresent(window_ptr) ?
+            "Show on this workspace only" : "Show on all workspaces");
+    }
 
     // Refresh the list of workspaces.
     bs_dllist_for_each(

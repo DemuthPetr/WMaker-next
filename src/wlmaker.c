@@ -297,6 +297,90 @@ static const bspl_desc_t _wlmaker_effects_desc[] = {
     BSPL_DESC_SENTINEL()
 };
 
+/** Enum descriptor for "FocusMode". */
+static const bspl_enum_desc_t _wlmaker_focus_modes[] = {
+    BSPL_ENUM("Click", WLMTK_FOCUS_CLICK),
+    BSPL_ENUM("Sloppy", WLMTK_FOCUS_SLOPPY),
+    BSPL_ENUM("FollowsMouse", WLMTK_FOCUS_FOLLOWS_MOUSE),
+    BSPL_ENUM_SENTINEL(),
+};
+
+/** Enum descriptor for "Placement". */
+static const bspl_enum_desc_t _wlmaker_placements[] = {
+    BSPL_ENUM("Smart", WLMTK_PLACEMENT_SMART),
+    BSPL_ENUM("Cascade", WLMTK_PLACEMENT_CASCADE),
+    BSPL_ENUM("Center", WLMTK_PLACEMENT_CENTER),
+    BSPL_ENUM("UnderPointer", WLMTK_PLACEMENT_UNDER_POINTER),
+    BSPL_ENUM("Random", WLMTK_PLACEMENT_RANDOM),
+    BSPL_ENUM_SENTINEL(),
+};
+
+/** The "Windows" configuration, as decoded. See @ref wlmtk_behavior_t. */
+typedef struct {
+    /** Focus mode. */
+    int                       focus_mode;
+    /** Auto-raise delay, ms; negative: never. */
+    int64_t                   raise_delay_ms;
+    /** Placement. */
+    int                       placement;
+    /** Snapping to edges & corners. */
+    bool                      snapping;
+    /** Snap distance, pixels. */
+    int64_t                   snap_distance;
+    /** Snapping to the top edge maximizes. */
+    bool                      snap_top_maximizes;
+} _wlmaker_windows_config_t;
+
+/** Decoder for the "Windows" dict of the configuration. */
+static const bspl_desc_t _wlmaker_windows_desc[] = {
+    BSPL_DESC_ENUM("FocusMode", false, _wlmaker_windows_config_t,
+                   focus_mode, focus_mode, WLMTK_FOCUS_CLICK,
+                   _wlmaker_focus_modes),
+    BSPL_DESC_INT64("RaiseDelay", false, _wlmaker_windows_config_t,
+                    raise_delay_ms, raise_delay_ms, -1),
+    BSPL_DESC_ENUM("Placement", false, _wlmaker_windows_config_t,
+                   placement, placement, WLMTK_PLACEMENT_SMART,
+                   _wlmaker_placements),
+    BSPL_DESC_BOOL("Snapping", false, _wlmaker_windows_config_t,
+                   snapping, snapping, true),
+    BSPL_DESC_INT64("SnapDistance", false, _wlmaker_windows_config_t,
+                    snap_distance, snap_distance, 8),
+    BSPL_DESC_BOOL("SnapTopMaximizes", false, _wlmaker_windows_config_t,
+                   snap_top_maximizes, snap_top_maximizes, true),
+    BSPL_DESC_SENTINEL()
+};
+
+/* ------------------------------------------------------------------------- */
+/** Applies window behavior from the config's optional "Windows" dict. */
+static void _wlmaker_apply_windows(
+    wlmaker_server_t *server_ptr,
+    bspl_dict_t *config_dict_ptr)
+{
+    _wlmaker_windows_config_t wc = {
+        .focus_mode = WLMTK_FOCUS_CLICK, .raise_delay_ms = -1,
+        .placement = WLMTK_PLACEMENT_SMART, .snapping = true,
+        .snap_distance = 8, .snap_top_maximizes = true };
+    bspl_dict_t *dict_ptr = bspl_dict_get_dict(config_dict_ptr, "Windows");
+    if (NULL != dict_ptr &&
+        !bspl_decode_dict(dict_ptr, _wlmaker_windows_desc, &wc)) {
+        bs_log(BS_WARNING, "Failed to decode 'Windows', using defaults.");
+        wc = (_wlmaker_windows_config_t){
+            .focus_mode = WLMTK_FOCUS_CLICK, .raise_delay_ms = -1,
+            .placement = WLMTK_PLACEMENT_SMART, .snapping = true,
+            .snap_distance = 8, .snap_top_maximizes = true };
+    }
+    wlmtk_behavior_t behavior = {
+        .focus_mode = (wlmtk_focus_mode_t)wc.focus_mode,
+        .raise_delay_ms = (int)BS_MIN(wc.raise_delay_ms, 10000),
+        .placement = (wlmtk_placement_t)wc.placement,
+        .snapping = wc.snapping,
+        .snap_distance = (int)wc.snap_distance,
+        .snap_top_maximizes = wc.snap_top_maximizes,
+    };
+    wlmtk_behavior_set(&behavior,
+                       wl_display_get_event_loop(server_ptr->wl_display_ptr));
+}
+
 /* ------------------------------------------------------------------------- */
 /** Applies look & feel effects from the config's optional "Effects" dict. */
 static void _wlmaker_apply_effects(
@@ -437,6 +521,7 @@ static void _wlmaker_reload_config(wlmaker_server_t *server_ptr)
     }
 
     _wlmaker_apply_effects(server_ptr, config_dict_ptr);
+    _wlmaker_apply_windows(server_ptr, config_dict_ptr);
 
     // Key bindings: Replace. If the new ones fail, restore the previous.
     wlmaker_action_unbind_keys(wlmaker_action_handle_ptr);
@@ -833,6 +918,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     if (NULL == server_ptr) return EXIT_FAILURE;
 
     _wlmaker_apply_effects(server_ptr, config_dict_ptr);
+    _wlmaker_apply_windows(server_ptr, config_dict_ptr);
     struct wl_event_source *sighup_source_ptr = wl_event_loop_add_signal(
         wl_display_get_event_loop(server_ptr->wl_display_ptr),
         SIGHUP, _wlmaker_handle_sighup, server_ptr);

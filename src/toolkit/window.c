@@ -21,6 +21,8 @@
 
 #include "window.h"
 
+#include "behavior.h"
+
 #include <libbase/libbase.h>
 #include <libbase/plist.h>
 #include <linux/input-event-codes.h>
@@ -122,6 +124,8 @@ struct _wlmtk_window_t {
     wlmtk_menu_t              *window_menu_ptr;
     /** Listener for then the popup menu requests to be closed. */
     struct wl_listener        menu_request_close_listener;
+    /** Listener for the element's pointer motion: Focus follows pointer. */
+    struct wl_listener        pointer_motion_listener;
 
     /**
      * Whether an "inorganic" sizing operation is in progress, and thus size
@@ -137,6 +141,14 @@ struct _wlmtk_window_t {
     bool                      fullscreen;
     /** Whether this window is currently in maximized state. */
     bool                      maximized;
+    /** Edges this window is tiled to (half or quarter maximized), or 0. */
+    uint32_t                  tiled_edges;
+    /** Kept above the other windows. */
+    bool                      keep_on_top;
+    /** Kept below the other windows. */
+    bool                      keep_at_bottom;
+    /** Shown on all workspaces. */
+    bool                      omnipresent;
     /** Whether this window is currently minimized (iconified). */
     bool                      minimized;
     /** Whether "Show Desktop" minimized it, to restore it on the toggle. */
@@ -184,6 +196,10 @@ static void _wlmtk_window_menu_request_close_handler(
     void *data_ptr);
 
 static void _wlmtk_window_style_destroy(bs_ref_t *ref_ptr);
+static void _wlmtk_window_handle_pointer_motion(
+    struct wl_listener *listener_ptr,
+    void *data_ptr);
+static void _wlmtk_window_apply_tile(wlmtk_window_t *window_ptr);
 
 static void _wlmtk_window_request_fullscreen_size(
     wlmtk_window_t *window_ptr,
@@ -291,6 +307,10 @@ wlmtk_window_t *wlmtk_window_create(
         &wlmtk_menu_events(window_ptr->window_menu_ptr)->request_close,
         &window_ptr->menu_request_close_listener,
         _wlmtk_window_menu_request_close_handler);
+    wlmtk_util_connect_listener_signal(
+        &wlmtk_window_element(window_ptr)->events.pointer_motion,
+        &window_ptr->pointer_motion_listener,
+        _wlmtk_window_handle_pointer_motion);
 
     _wlmtk_window_apply_decoration(window_ptr);
     return window_ptr;
@@ -303,6 +323,7 @@ error:
 /* ------------------------------------------------------------------------- */
 void wlmtk_window_destroy(wlmtk_window_t *window_ptr)
 {
+    wlmtk_util_disconnect_listener(&window_ptr->pointer_motion_listener);
     wlmtk_effects_cancel(wlmtk_window_element(window_ptr));
     wlmtk_window_set_server_side_decorated(window_ptr, false);
 
@@ -755,6 +776,15 @@ void wlmtk_window_commit_maximized(
         NULL == window_ptr->workspace_ptr) return;
     window_ptr->maximized = maximized;
 
+    if (maximized) {
+        window_ptr->tiled_edges = 0;
+    } else if (0 != window_ptr->tiled_edges) {
+        // Unmaximized on the way to a tile.
+        _wlmtk_window_apply_tile(window_ptr);
+        wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
+        return;
+    }
+
     struct wlr_box max_box = wlmtk_workspace_get_maximize_extents(
         window_ptr->workspace_ptr,
         wlmtk_window_get_wlr_output(window_ptr));
@@ -791,9 +821,177 @@ void wlmtk_window_request_shaded(wlmtk_window_t *window_ptr, bool shaded)
 }
 
 /* ------------------------------------------------------------------------- */
+bool wlmtk_window_is_resizable(wlmtk_window_t *window_ptr)
+{
+    return window_ptr->properties & WLMTK_WINDOW_PROPERTY_RESIZABLE;
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Pointer moved within the window: With a focus-follows-pointer mode, the
+ * window gets the focus (and, after the raise delay, is raised).
+ */
+void _wlmtk_window_handle_pointer_motion(
+    struct wl_listener *listener_ptr,
+    __UNUSED__ void *data_ptr)
+{
+    wlmtk_window_t *window_ptr = BS_CONTAINER_OF(
+        listener_ptr, wlmtk_window_t, pointer_motion_listener);
+    if (WLMTK_FOCUS_CLICK == wlmtk_behavior_get()->focus_mode) return;
+    wlmtk_workspace_t *workspace_ptr = window_ptr->workspace_ptr;
+    if (NULL == workspace_ptr || window_ptr->activated ||
+        wlmtk_window_is_minimized(window_ptr) ||
+        !wlmtk_workspace_enabled(workspace_ptr) ||
+        !wlmtk_window_is_iconifiable(window_ptr)) return;
+    wlmtk_workspace_activate_window(workspace_ptr, window_ptr);
+    wlmtk_behavior_schedule_raise(workspace_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
 bool wlmtk_window_is_shaded(wlmtk_window_t *window_ptr)
 {
     return window_ptr->shaded;
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_window_set_keep_on_top(wlmtk_window_t *window_ptr, bool on_top)
+{
+    if (window_ptr->keep_on_top == on_top) return;
+    window_ptr->keep_on_top = on_top;
+    if (on_top) window_ptr->keep_at_bottom = false;
+    if (NULL != window_ptr->workspace_ptr) {
+        wlmtk_workspace_restack(window_ptr->workspace_ptr);
+    }
+    wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmtk_window_is_keep_on_top(wlmtk_window_t *window_ptr)
+{
+    return window_ptr->keep_on_top;
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_window_set_keep_at_bottom(wlmtk_window_t *window_ptr, bool at_bottom)
+{
+    if (window_ptr->keep_at_bottom == at_bottom) return;
+    window_ptr->keep_at_bottom = at_bottom;
+    if (at_bottom) window_ptr->keep_on_top = false;
+    if (NULL != window_ptr->workspace_ptr) {
+        wlmtk_workspace_restack(window_ptr->workspace_ptr);
+    }
+    wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmtk_window_is_keep_at_bottom(wlmtk_window_t *window_ptr)
+{
+    return window_ptr->keep_at_bottom;
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_window_set_omnipresent(wlmtk_window_t *window_ptr, bool omnipresent)
+{
+    if (window_ptr->omnipresent == omnipresent) return;
+    window_ptr->omnipresent = omnipresent;
+    wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmtk_window_is_omnipresent(wlmtk_window_t *window_ptr)
+{
+    return window_ptr->omnipresent;
+}
+
+/* ------------------------------------------------------------------------- */
+struct wlr_box wlmtk_window_get_organic_size(wlmtk_window_t *window_ptr)
+{
+    return (struct wlr_box){
+        .width = window_ptr->organic_bounding_box.width,
+        .height = window_ptr->organic_bounding_box.height };
+}
+
+/* ------------------------------------------------------------------------- */
+uint32_t wlmtk_window_get_tiled_edges(wlmtk_window_t *window_ptr)
+{
+    return window_ptr->tiled_edges;
+}
+
+/* ------------------------------------------------------------------------- */
+/** Positions and sizes the window to its tile. */
+void _wlmtk_window_apply_tile(wlmtk_window_t *window_ptr)
+{
+    struct wlr_box box = wlmtk_workspace_get_tile_extents(
+        window_ptr->workspace_ptr,
+        wlmtk_window_get_wlr_output(window_ptr),
+        window_ptr->tiled_edges);
+    wlmtk_workspace_set_window_position(
+        window_ptr->workspace_ptr, window_ptr, box.x, box.y);
+
+    // Content size: The tile, less the decoration (as for maximizing).
+    struct wlr_box wbox = wlmtk_element_get_dimensions_box(
+        wlmtk_bordered_element(&window_ptr->bordered));
+    struct wlr_box cbox = wlmtk_element_get_dimensions_box(
+        window_ptr->content_element_ptr);
+    struct wlr_box size = {
+        .width = box.width - (wbox.width - cbox.width),
+        .height = box.height - (wbox.height - cbox.height),
+    };
+    wl_signal_emit(&window_ptr->events.request_size, &size);
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_window_request_tiled(wlmtk_window_t *window_ptr, uint32_t edges)
+{
+    if (window_ptr->fullscreen || NULL == window_ptr->workspace_ptr) return;
+
+    if (0 == edges) {
+        if (0 == window_ptr->tiled_edges) return;
+        window_ptr->tiled_edges = 0;
+        wlmtk_workspace_set_window_position(
+            window_ptr->workspace_ptr, window_ptr,
+            window_ptr->organic_bounding_box.x,
+            window_ptr->organic_bounding_box.y);
+        struct wlr_box size = window_ptr->organic_bounding_box;
+        size.x = size.y = 0;
+        wl_signal_emit(&window_ptr->events.request_size, &size);
+        window_ptr->inorganic_sizing = false;
+        wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
+        return;
+    }
+
+    window_ptr->tiled_edges = edges;
+    window_ptr->inorganic_sizing = true;
+    // Unmaximizing first: Its commit lands in the tile, see
+    // @ref wlmtk_window_commit_maximized.
+    if (window_ptr->maximized) {
+        wlmtk_window_request_maximized(window_ptr, false);
+        window_ptr->inorganic_sizing = true;
+    }
+    _wlmtk_window_apply_tile(window_ptr);
+    wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_window_untile_for_move(wlmtk_window_t *window_ptr, int pointer_x)
+{
+    if (0 == window_ptr->tiled_edges) return;
+    int x, y;
+    wlmtk_element_get_position(wlmtk_window_element(window_ptr), &x, &y);
+    struct wlr_box tile = wlmtk_window_get_bounding_box(window_ptr);
+    window_ptr->tiled_edges = 0;
+    window_ptr->inorganic_sizing = false;
+    // Keep the pointer at the same relative spot of the (narrower) window.
+    if (0 < tile.width) {
+        x = pointer_x - (pointer_x - x) *
+            window_ptr->organic_bounding_box.width / tile.width;
+    }
+    wlmtk_workspace_set_window_position(
+        window_ptr->workspace_ptr, window_ptr, x, y);
+    struct wlr_box size = window_ptr->organic_bounding_box;
+    size.x = size.y = 0;
+    wl_signal_emit(&window_ptr->events.request_size, &size);
+    wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
 }
 
 /* ------------------------------------------------------------------------- */

@@ -31,6 +31,7 @@
 #include "button.h"
 #include "container.h"
 #include "dock.h"
+#include "behavior.h"
 #include "effects.h"
 #include "element.h"
 #include "fsm.h"

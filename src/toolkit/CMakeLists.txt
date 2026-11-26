@@ -15,6 +15,7 @@
 cmake_minimum_required(VERSION 3.13)
 set(public_header_files
   base.h
+  behavior.h
   bordered.h
   box.h
   buffer.h
@@ -53,6 +54,7 @@ set(public_header_files
 add_library(toolkit STATIC)
 target_sources(toolkit PRIVATE
   base.c
+  behavior.c
   bordered.c
   box.c
   buffer.c

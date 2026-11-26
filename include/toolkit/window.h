@@ -429,6 +429,46 @@ void wlmtk_window_request_shaded(wlmtk_window_t *window_ptr, bool shaded);
 /** @return whether the window currently is shaded. */
 bool wlmtk_window_is_shaded(wlmtk_window_t *window_ptr);
 
+/** @return whether the window can be resized (eg. tiled). */
+bool wlmtk_window_is_resizable(wlmtk_window_t *window_ptr);
+
+/** Keeps the window above the others (clears keep-at-bottom). */
+void wlmtk_window_set_keep_on_top(wlmtk_window_t *window_ptr, bool on_top);
+/** @return whether the window is kept above the others. */
+bool wlmtk_window_is_keep_on_top(wlmtk_window_t *window_ptr);
+/** Keeps the window below the others (clears keep-on-top). */
+void wlmtk_window_set_keep_at_bottom(wlmtk_window_t *window_ptr, bool at_bottom);
+/** @return whether the window is kept below the others. */
+bool wlmtk_window_is_keep_at_bottom(wlmtk_window_t *window_ptr);
+/** Shows the window on all workspaces. */
+void wlmtk_window_set_omnipresent(wlmtk_window_t *window_ptr, bool omnipresent);
+/** @return whether the window is shown on all workspaces. */
+bool wlmtk_window_is_omnipresent(wlmtk_window_t *window_ptr);
+
+/**
+ * Tiles the window: Half (one edge) or quarter (two adjacent edges) of the
+ * output's usable area. 0 restores the window's own position & size.
+ *
+ * @param window_ptr
+ * @param edges               Bitmask of `enum wlr_edges`.
+ */
+void wlmtk_window_request_tiled(wlmtk_window_t *window_ptr, uint32_t edges);
+
+/** @return the window's own content size, outside maximize/tile states. */
+struct wlr_box wlmtk_window_get_organic_size(wlmtk_window_t *window_ptr);
+
+/** @return the edges the window is tiled to, or 0. */
+uint32_t wlmtk_window_get_tiled_edges(wlmtk_window_t *window_ptr);
+
+/**
+ * Restores a tiled window's own size as a move starts, keeping the pointer
+ * over the same relative spot of the window.
+ *
+ * @param window_ptr
+ * @param pointer_x           Pointer position, workspace coordinates.
+ */
+void wlmtk_window_untile_for_move(wlmtk_window_t *window_ptr, int pointer_x);
+
 /**
  * @return whether the window can be minimized (iconified). Application
  *     windows can; menus and other internal windows can't.

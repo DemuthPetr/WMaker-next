@@ -256,6 +256,31 @@ void wlmtk_container_remove_element(
 }
 
 /* ------------------------------------------------------------------------- */
+void wlmtk_container_lower_element_to_bottom(
+    wlmtk_container_t *container_ptr,
+    wlmtk_element_t *element_ptr)
+{
+    BS_ASSERT(element_ptr->parent_container_ptr == container_ptr);
+
+    // Already at the bottom? Nothing to do.
+    if (wlmtk_dlnode_from_element(element_ptr) ==
+        container_ptr->elements.tail_ptr) return;
+
+    bs_dllist_remove(
+        &container_ptr->elements,
+        wlmtk_dlnode_from_element(element_ptr));
+    bs_dllist_push_back(
+        &container_ptr->elements,
+        wlmtk_dlnode_from_element(element_ptr));
+
+    if (NULL != element_ptr->wlr_scene_node_ptr) {
+        wlr_scene_node_lower_to_bottom(element_ptr->wlr_scene_node_ptr);
+    }
+
+    wlmtk_container_invalidate_layout(container_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
 void wlmtk_container_raise_element_to_top(
     wlmtk_container_t *container_ptr,
     wlmtk_element_t *element_ptr)

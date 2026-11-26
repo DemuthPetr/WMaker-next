@@ -637,6 +637,27 @@ void _wlmtk_root_switch_to_workspace(
     } else {
         BS_ASSERT(root_ptr = wlmtk_workspace_get_root(workspace_ptr));
 
+        // Windows shown on all workspaces come along.
+        wlmtk_window_t *focused_ptr = NULL;
+        wlmtk_workspace_t *old_ptr = root_ptr->current_workspace_ptr;
+        if (NULL != old_ptr) {
+            bs_dllist_t *windows_ptr = wlmtk_workspace_get_windows_dllist(
+                old_ptr);
+            bs_dllist_node_t *dlnode_ptr = windows_ptr->tail_ptr;
+            while (NULL != dlnode_ptr) {
+                // From the bottom up: Keeps their stacking order.
+                bs_dllist_node_t *prev_ptr = dlnode_ptr->prev_ptr;
+                wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(
+                    dlnode_ptr);
+                if (wlmtk_window_is_omnipresent(window_ptr)) {
+                    if (wlmtk_workspace_get_activated_window(old_ptr) ==
+                        window_ptr) focused_ptr = window_ptr;
+                    wlmtk_workspace_transfer_window(workspace_ptr, window_ptr);
+                }
+                dlnode_ptr = prev_ptr;
+            }
+        }
+
         wlmtk_element_set_visible(
             wlmtk_workspace_element(workspace_ptr), true);
         if (NULL != root_ptr->current_workspace_ptr) {
@@ -647,6 +668,9 @@ void _wlmtk_root_switch_to_workspace(
         }
         root_ptr->current_workspace_ptr = workspace_ptr;
         wlmtk_workspace_enable(root_ptr->current_workspace_ptr, true);
+        if (NULL != focused_ptr) {
+            wlmtk_workspace_activate_window(workspace_ptr, focused_ptr);
+        }
     }
 
     wl_signal_emit(

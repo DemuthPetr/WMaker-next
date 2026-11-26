@@ -26,13 +26,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <wayland-server-core.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <xkbcommon/xkbcommon.h>
 #define WLR_USE_UNSTABLE
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_keyboard.h>
+#include <wlr/util/edges.h>
 #undef WLR_USE_UNSTABLE
 
 #include "backend/backend.h"
@@ -96,6 +100,10 @@ static void _wlmaker_action_hide(
     wlmtk_window_t *app_window_ptr,
     bool others);
 static void _wlmaker_action_show_desktop(wlmaker_server_t *server_ptr);
+static void _wlmaker_action_window(
+    wlmtk_workspace_t *workspace_ptr,
+    wlmtk_window_t *window_ptr,
+    wlmaker_action_t action);
 
 /* == Data ================================================================= */
 
@@ -156,6 +164,20 @@ const bspl_enum_desc_t wlmaker_action_desc[] = {
     BSPL_ENUM("WindowShade", WLMAKER_ACTION_WINDOW_SHADE),
     BSPL_ENUM("WindowUnshade", WLMAKER_ACTION_WINDOW_UNSHADE),
     BSPL_ENUM("WindowClose", WLMAKER_ACTION_WINDOW_CLOSE),
+    BSPL_ENUM("WindowKill", WLMAKER_ACTION_WINDOW_KILL),
+    BSPL_ENUM("WindowTileLeft", WLMAKER_ACTION_WINDOW_TILE_LEFT),
+    BSPL_ENUM("WindowTileRight", WLMAKER_ACTION_WINDOW_TILE_RIGHT),
+    BSPL_ENUM("WindowTileTop", WLMAKER_ACTION_WINDOW_TILE_TOP),
+    BSPL_ENUM("WindowTileBottom", WLMAKER_ACTION_WINDOW_TILE_BOTTOM),
+    BSPL_ENUM("WindowTileTopLeft", WLMAKER_ACTION_WINDOW_TILE_TOP_LEFT),
+    BSPL_ENUM("WindowTileTopRight", WLMAKER_ACTION_WINDOW_TILE_TOP_RIGHT),
+    BSPL_ENUM("WindowTileBottomLeft", WLMAKER_ACTION_WINDOW_TILE_BOTTOM_LEFT),
+    BSPL_ENUM("WindowTileBottomRight", WLMAKER_ACTION_WINDOW_TILE_BOTTOM_RIGHT),
+    BSPL_ENUM("WindowUntile", WLMAKER_ACTION_WINDOW_UNTILE),
+    BSPL_ENUM("WindowCenter", WLMAKER_ACTION_WINDOW_CENTER),
+    BSPL_ENUM("WindowToggleOnTop", WLMAKER_ACTION_WINDOW_TOGGLE_ON_TOP),
+    BSPL_ENUM("WindowToggleAtBottom", WLMAKER_ACTION_WINDOW_TOGGLE_AT_BOTTOM),
+    BSPL_ENUM("WindowToggleOmnipresent", WLMAKER_ACTION_WINDOW_TOGGLE_OMNIPRESENT),
     BSPL_ENUM("WindowToNextWorkspace", WLMAKER_ACTION_WINDOW_TO_NEXT_WORKSPACE),
     BSPL_ENUM("WindowToPreviousWorkspace", WLMAKER_ACTION_WINDOW_TO_PREVIOUS_WORKSPACE),
 
@@ -330,13 +352,27 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
         break;
 
     case WLMAKER_ACTION_WINDOW_RAISE:
-        // TODO(kaeser@gubbe.ch): (re)implement using toolkit.
-        bs_log(BS_WARNING, "Raise window: Unimplemented.");
-        break;
-
     case WLMAKER_ACTION_WINDOW_LOWER:
-        // TODO(kaeser@gubbe.ch): (re)implement using toolkit.
-        bs_log(BS_WARNING, "Lower window: Unimplemented.");
+    case WLMAKER_ACTION_WINDOW_KILL:
+    case WLMAKER_ACTION_WINDOW_TILE_LEFT:
+    case WLMAKER_ACTION_WINDOW_TILE_RIGHT:
+    case WLMAKER_ACTION_WINDOW_TILE_TOP:
+    case WLMAKER_ACTION_WINDOW_TILE_BOTTOM:
+    case WLMAKER_ACTION_WINDOW_TILE_TOP_LEFT:
+    case WLMAKER_ACTION_WINDOW_TILE_TOP_RIGHT:
+    case WLMAKER_ACTION_WINDOW_TILE_BOTTOM_LEFT:
+    case WLMAKER_ACTION_WINDOW_TILE_BOTTOM_RIGHT:
+    case WLMAKER_ACTION_WINDOW_UNTILE:
+    case WLMAKER_ACTION_WINDOW_CENTER:
+    case WLMAKER_ACTION_WINDOW_TOGGLE_ON_TOP:
+    case WLMAKER_ACTION_WINDOW_TOGGLE_AT_BOTTOM:
+    case WLMAKER_ACTION_WINDOW_TOGGLE_OMNIPRESENT:
+        workspace_ptr = wlmtk_root_get_current_workspace(
+            server_ptr->root_ptr);
+        window_ptr = wlmtk_workspace_get_activated_window(workspace_ptr);
+        if (NULL != window_ptr) {
+            _wlmaker_action_window(workspace_ptr, window_ptr, action);
+        }
         break;
 
     case WLMAKER_ACTION_WINDOW_TOGGLE_FULLSCREEN:
@@ -868,6 +904,78 @@ bool _wlmaker_action_bound_callback(
         action_binding_ptr->action,
         action_binding_ptr->action_arg_ptr);
     return true;
+}
+
+/* ------------------------------------------------------------------------- */
+/** Window actions: Stacking, tiling, states, kill -- on `window_ptr`. */
+void _wlmaker_action_window(
+    wlmtk_workspace_t *workspace_ptr,
+    wlmtk_window_t *window_ptr,
+    wlmaker_action_t action)
+{
+    static const struct { wlmaker_action_t action; uint32_t edges; } tiles[] = {
+        { WLMAKER_ACTION_WINDOW_TILE_LEFT, WLR_EDGE_LEFT },
+        { WLMAKER_ACTION_WINDOW_TILE_RIGHT, WLR_EDGE_RIGHT },
+        { WLMAKER_ACTION_WINDOW_TILE_TOP, WLR_EDGE_TOP },
+        { WLMAKER_ACTION_WINDOW_TILE_BOTTOM, WLR_EDGE_BOTTOM },
+        { WLMAKER_ACTION_WINDOW_TILE_TOP_LEFT, WLR_EDGE_TOP | WLR_EDGE_LEFT },
+        { WLMAKER_ACTION_WINDOW_TILE_TOP_RIGHT, WLR_EDGE_TOP | WLR_EDGE_RIGHT },
+        { WLMAKER_ACTION_WINDOW_TILE_BOTTOM_LEFT,
+          WLR_EDGE_BOTTOM | WLR_EDGE_LEFT },
+        { WLMAKER_ACTION_WINDOW_TILE_BOTTOM_RIGHT,
+          WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT },
+        { WLMAKER_ACTION_WINDOW_UNTILE, 0 },
+    };
+    for (size_t i = 0; i < sizeof(tiles) / sizeof(tiles[0]); ++i) {
+        if (tiles[i].action != action) continue;
+        if (!wlmtk_window_is_resizable(window_ptr)) return;
+        // The same tile again restores the window, as Window Maker does.
+        uint32_t edges = tiles[i].edges;
+        if (edges == wlmtk_window_get_tiled_edges(window_ptr)) edges = 0;
+        wlmtk_window_request_tiled(window_ptr, edges);
+        return;
+    }
+
+    switch (action) {
+    case WLMAKER_ACTION_WINDOW_RAISE:
+        wlmtk_workspace_raise_window(workspace_ptr, window_ptr);
+        break;
+    case WLMAKER_ACTION_WINDOW_LOWER:
+        wlmtk_workspace_lower_window(workspace_ptr, window_ptr);
+        break;
+    case WLMAKER_ACTION_WINDOW_CENTER:
+        wlmtk_workspace_center_window(workspace_ptr, window_ptr);
+        break;
+    case WLMAKER_ACTION_WINDOW_TOGGLE_ON_TOP:
+        wlmtk_window_set_keep_on_top(
+            window_ptr, !wlmtk_window_is_keep_on_top(window_ptr));
+        break;
+    case WLMAKER_ACTION_WINDOW_TOGGLE_AT_BOTTOM:
+        wlmtk_window_set_keep_at_bottom(
+            window_ptr, !wlmtk_window_is_keep_at_bottom(window_ptr));
+        break;
+    case WLMAKER_ACTION_WINDOW_TOGGLE_OMNIPRESENT:
+        wlmtk_window_set_omnipresent(
+            window_ptr, !wlmtk_window_is_omnipresent(window_ptr));
+        break;
+    case WLMAKER_ACTION_WINDOW_KILL: {
+        // Unlike Close, doesn't ask the application: Ends its process.
+        const wlmtk_util_client_t *client_ptr =
+            wlmtk_window_get_client_ptr(window_ptr);
+        if (NULL == client_ptr || 0 >= client_ptr->pid ||
+            getpid() == client_ptr->pid) {
+            bs_log(BS_WARNING, "Kill: No process known for window %p",
+                   window_ptr);
+            break;
+        }
+        bs_log(BS_INFO, "Kill: Sending SIGKILL to process %d",
+               (int)client_ptr->pid);
+        kill(client_ptr->pid, SIGKILL);
+        break;
+    }
+    default:
+        break;
+    }
 }
 
 /* ------------------------------------------------------------------------- */

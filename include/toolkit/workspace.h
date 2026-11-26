@@ -114,6 +114,58 @@ void wlmtk_workspace_get_details(
     int *index_ptr);
 
 /**
+ * Lowers the window below the others (but above keep-at-bottom ones).
+ *
+ * @param workspace_ptr
+ * @param window_ptr
+ */
+void wlmtk_workspace_lower_window(
+    wlmtk_workspace_t *workspace_ptr,
+    wlmtk_window_t *window_ptr);
+
+/**
+ * Re-orders the windows: Keep-at-bottom ones at the bottom, keep-on-top
+ * ones at the top, each keeping their relative order.
+ *
+ * @param workspace_ptr
+ */
+void wlmtk_workspace_restack(wlmtk_workspace_t *workspace_ptr);
+
+/**
+ * Moves a mapped window to this workspace, as is: Without unmapping it (no
+ * unmap/map events), keeping its position. For windows on all workspaces.
+ *
+ * @param workspace_ptr
+ * @param window_ptr
+ */
+void wlmtk_workspace_transfer_window(
+    wlmtk_workspace_t *workspace_ptr,
+    wlmtk_window_t *window_ptr);
+
+/**
+ * @return The half (one edge) or quarter (two edges) of the output's area
+ *     available for maximized windows. All of it, for no edges.
+ *
+ * @param workspace_ptr
+ * @param wlr_output_ptr      May be NULL: The primary output.
+ * @param edges               Bitmask of `enum wlr_edges`.
+ */
+struct wlr_box wlmtk_workspace_get_tile_extents(
+    wlmtk_workspace_t *workspace_ptr,
+    struct wlr_output *wlr_output_ptr,
+    uint32_t edges);
+
+/**
+ * Centers the window on its output (un-tiling it first).
+ *
+ * @param workspace_ptr
+ * @param window_ptr
+ */
+void wlmtk_workspace_center_window(
+    wlmtk_workspace_t *workspace_ptr,
+    wlmtk_window_t *window_ptr);
+
+/**
  * Returns the workspace'soutput extents available for maximized windows.
  *
  * @param workspace_ptr

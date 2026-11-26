@@ -37,7 +37,9 @@
 #undef WLR_USE_UNSTABLE
 
 #include "container.h"
+#include "behavior.h"
 #include "effects.h"
+#include "rectangle.h"
 #include "fsm.h"
 #include "input.h"
 #include "layer.h"
@@ -130,6 +132,13 @@ struct _wlmtk_workspace_t {
     /** Listener for @ref wlmtk_element_events_t::pointer_motion. */
     struct wl_listener        element_pointer_motion_listener;
 
+    /** Preview of where a dragged window will snap to. NULL if none. */
+    wlmtk_rectangle_t         *snap_preview_ptr;
+    /** Edges the dragged window will snap to, on release. */
+    uint32_t                  snap_edges;
+    /** Whether the dragged window will be maximized, on release. */
+    bool                      snap_maximize;
+
     // Elements below not owned by wlmtk_workspace_t.
     /** Output layout. */
     struct wlr_output_layout *wlr_output_layout_ptr;
@@ -182,6 +191,12 @@ static bool pfsm_move_motion(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
 static bool pfsm_resize_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
 static bool pfsm_resize_motion(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
 static bool pfsm_reset(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
+static bool pfsm_move_release(wlmtk_fsm_t *fsm_ptr, void *ud_ptr);
+static void _wlmtk_workspace_set_snap_preview(
+    wlmtk_workspace_t *workspace_ptr,
+    struct wlr_output *wlr_output_ptr,
+    uint32_t edges,
+    bool maximize);
 
 /* == Data ================================================================= */
 
@@ -212,7 +227,7 @@ const wlmtk_element_vmt_t     workspace_element_vmt = {
 static const wlmtk_fsm_transition_t pfsm_transitions[] = {
     { PFSMS_PASSTHROUGH, PFSME_BEGIN_MOVE, PFSMS_MOVE, pfsm_move_begin },
     { PFSMS_MOVE, PFSME_MOTION, PFSMS_MOVE, pfsm_move_motion },
-    { PFSMS_MOVE, PFSME_RELEASED, PFSMS_PASSTHROUGH, pfsm_reset },
+    { PFSMS_MOVE, PFSME_RELEASED, PFSMS_PASSTHROUGH, pfsm_move_release },
     { PFSMS_MOVE, PFSME_RESET, PFSMS_PASSTHROUGH, pfsm_reset },
     { PFSMS_PASSTHROUGH, PFSME_BEGIN_RESIZE, PFSMS_RESIZE, pfsm_resize_begin },
     { PFSMS_RESIZE, PFSME_MOTION, PFSMS_RESIZE, pfsm_resize_motion },
@@ -359,6 +374,8 @@ wlmtk_workspace_t *wlmtk_workspace_create(
 /* ------------------------------------------------------------------------- */
 void wlmtk_workspace_destroy(wlmtk_workspace_t *workspace_ptr)
 {
+    wlmtk_behavior_cancel_raise(workspace_ptr);
+    _wlmtk_workspace_set_snap_preview(workspace_ptr, NULL, 0, false);
     wlmtk_util_disconnect_listener(
         &workspace_ptr->output_layout_change_listener);
 
@@ -603,6 +620,7 @@ void wlmtk_workspace_map_window(wlmtk_workspace_t *workspace_ptr,
     bs_dllist_push_front(&workspace_ptr->windows,
                          wlmtk_dlnode_from_window(window_ptr));
     wlmtk_window_set_workspace(window_ptr, workspace_ptr);
+    wlmtk_workspace_restack(workspace_ptr);
     wlmtk_workspace_activate_window(workspace_ptr, window_ptr);
     if (wlmtk_effects_get()->animate_map) {
         wlmtk_effects_animate(
@@ -993,6 +1011,135 @@ void wlmtk_workspace_raise_window(
         &workspace_ptr->fullscreen_container :
         &workspace_ptr->window_container,
         wlmtk_window_element(window_ptr));
+    wlmtk_workspace_restack(workspace_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_workspace_lower_window(
+    wlmtk_workspace_t *workspace_ptr,
+    wlmtk_window_t *window_ptr)
+{
+    BS_ASSERT(workspace_ptr == wlmtk_window_get_workspace(window_ptr));
+    if (wlmtk_window_is_fullscreen(window_ptr)) return;
+    bs_dllist_remove(&workspace_ptr->windows,
+                     wlmtk_dlnode_from_window(window_ptr));
+    bs_dllist_push_back(&workspace_ptr->windows,
+                        wlmtk_dlnode_from_window(window_ptr));
+    wlmtk_container_lower_element_to_bottom(
+        &workspace_ptr->window_container,
+        wlmtk_window_element(window_ptr));
+    wlmtk_workspace_restack(workspace_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_workspace_restack(wlmtk_workspace_t *workspace_ptr)
+{
+    wlmtk_container_t *c_ptr = &workspace_ptr->window_container;
+    size_t n = bs_dllist_size(&c_ptr->elements);
+    if (2 > n) return;
+    wlmtk_element_t **elements_ptr = logged_calloc(n, sizeof(*elements_ptr));
+    if (NULL == elements_ptr) return;
+    size_t i = 0;
+    for (bs_dllist_node_t *dlnode_ptr = c_ptr->elements.head_ptr;
+         NULL != dlnode_ptr && i < n;
+         dlnode_ptr = dlnode_ptr->next_ptr) {
+        elements_ptr[i++] = wlmtk_element_from_dlnode(dlnode_ptr);
+    }
+    // Keep-at-bottom windows to the bottom, top-most first: Keeps their order.
+    for (size_t j = 0; j < i; ++j) {
+        if (wlmtk_window_is_keep_at_bottom(
+                wlmtk_window_from_element(elements_ptr[j]))) {
+            wlmtk_container_lower_element_to_bottom(c_ptr, elements_ptr[j]);
+        }
+    }
+    // Keep-on-top windows to the top, bottom-most first: Keeps their order.
+    for (size_t j = i; j > 0; --j) {
+        if (wlmtk_window_is_keep_on_top(
+                wlmtk_window_from_element(elements_ptr[j - 1]))) {
+            wlmtk_container_raise_element_to_top(c_ptr, elements_ptr[j - 1]);
+        }
+    }
+    free(elements_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_workspace_transfer_window(
+    wlmtk_workspace_t *workspace_ptr,
+    wlmtk_window_t *window_ptr)
+{
+    wlmtk_workspace_t *from_ptr = wlmtk_window_get_workspace(window_ptr);
+    if (NULL == from_ptr || from_ptr == workspace_ptr ||
+        wlmtk_window_is_fullscreen(window_ptr)) return;
+
+    if (from_ptr->grabbed_window_ptr == window_ptr) {
+        wlmtk_fsm_event(&from_ptr->fsm, PFSME_RESET, NULL);
+    }
+    if (from_ptr->activated_window_ptr == window_ptr) {
+        wlmtk_workspace_activate_window(from_ptr, NULL);
+    }
+    if (from_ptr->formerly_activated_window_ptr == window_ptr) {
+        from_ptr->formerly_activated_window_ptr = NULL;
+    }
+    wlmtk_container_remove_element(&from_ptr->window_container,
+                                   wlmtk_window_element(window_ptr));
+    bs_dllist_remove(&from_ptr->windows, wlmtk_dlnode_from_window(window_ptr));
+
+    wlmtk_container_add_element(&workspace_ptr->window_container,
+                                wlmtk_window_element(window_ptr));
+    bs_dllist_push_front(&workspace_ptr->windows,
+                         wlmtk_dlnode_from_window(window_ptr));
+    wlmtk_window_set_workspace(window_ptr, workspace_ptr);
+    wlmtk_workspace_restack(workspace_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+struct wlr_box wlmtk_workspace_get_tile_extents(
+    wlmtk_workspace_t *workspace_ptr,
+    struct wlr_output *wlr_output_ptr,
+    uint32_t edges)
+{
+    struct wlr_box box = wlmtk_workspace_get_maximize_extents(
+        workspace_ptr, wlr_output_ptr);
+    if (edges & WLR_EDGE_LEFT) {
+        box.width /= 2;
+    } else if (edges & WLR_EDGE_RIGHT) {
+        box.x += box.width / 2;
+        box.width -= box.width / 2;
+    }
+    if (edges & WLR_EDGE_TOP) {
+        box.height /= 2;
+    } else if (edges & WLR_EDGE_BOTTOM) {
+        box.y += box.height / 2;
+        box.height -= box.height / 2;
+    }
+    return box;
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_workspace_center_window(
+    wlmtk_workspace_t *workspace_ptr,
+    wlmtk_window_t *window_ptr)
+{
+    if (wlmtk_window_is_fullscreen(window_ptr) ||
+        wlmtk_window_is_maximized(window_ptr)) return;
+    struct wlr_box extents = wlmtk_workspace_get_maximize_extents(
+        workspace_ptr, wlmtk_window_get_wlr_output(window_ptr));
+    struct wlr_box wbox = wlmtk_window_get_bounding_box(window_ptr);
+    if (0 != wlmtk_window_get_tiled_edges(window_ptr)) {
+        // Untiling resizes later (the client commits): Center by the size
+        // it will have -- its own, plus the decoration.
+        struct wlr_box content = wlmtk_window_get_size(window_ptr);
+        struct wlr_box organic = wlmtk_window_get_organic_size(window_ptr);
+        wbox.width += organic.width - content.width;
+        wbox.height += organic.height - content.height;
+        wlmtk_window_request_tiled(window_ptr, 0);
+    }
+    int x, y;
+    wlmtk_element_get_position(wlmtk_window_element(window_ptr), &x, &y);
+    // Bounding box may start off the element's origin (eg. borders).
+    x = extents.x + (extents.width - wbox.width) / 2 + (x - wbox.x);
+    y = extents.y + (extents.height - wbox.height) / 2 + (y - wbox.y);
+    wlmtk_workspace_set_window_position(workspace_ptr, window_ptr, x, y);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1184,6 +1331,15 @@ void _wlmtk_workspace_handle_element_pointer_motion(
     wlmtk_workspace_t *workspace_ptr = BS_CONTAINER_OF(
         listener_ptr, wlmtk_workspace_t, element_pointer_motion_listener);
     wlmtk_fsm_event(&workspace_ptr->fsm, PFSME_MOTION, NULL);
+
+    // Focus follows mouse: Over the desktop, no window has focus.
+    if (WLMTK_FOCUS_FOLLOWS_MOUSE == wlmtk_behavior_get()->focus_mode &&
+        NULL == workspace_ptr->grabbed_window_ptr &&
+        NULL == workspace_ptr->window_container.pointer_focus_element_ptr &&
+        NULL == workspace_ptr->fullscreen_container.pointer_focus_element_ptr &&
+        NULL != workspace_ptr->activated_window_ptr) {
+        wlmtk_workspace_activate_window(workspace_ptr, NULL);
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1313,6 +1469,47 @@ void _wlmtk_workspace_place_window(wlmtk_workspace_t *workspace_ptr,
     struct wlr_box extents = wlmtk_workspace_get_maximize_extents(
         workspace_ptr, wlmtk_window_get_wlr_output(window_ptr));
 
+    // The window's element origin, relative to its bounding box.
+    int ex, ey;
+    wlmtk_element_get_position(wlmtk_window_element(window_ptr), &ex, &ey);
+    int dx = ex - wbox.x, dy = ey - wbox.y;
+    int free_w = BS_MAX(extents.width - wbox.width, 0);
+    int free_h = BS_MAX(extents.height - wbox.height, 0);
+    int px = 0, py = 0;
+    bool placed = true;
+    switch (wlmtk_behavior_get()->placement) {
+    case WLMTK_PLACEMENT_CENTER:
+        px = extents.x + free_w / 2;
+        py = extents.y + free_h / 2;
+        break;
+    case WLMTK_PLACEMENT_UNDER_POINTER:
+        px = BS_MIN(BS_MAX(
+            (int)workspace_ptr->super_container.super_element
+            .last_pointer_motion_event.x - wbox.width / 2,
+            extents.x), extents.x + free_w);
+        py = BS_MIN(BS_MAX(
+            (int)workspace_ptr->super_container.super_element
+            .last_pointer_motion_event.y - wbox.height / 2,
+            extents.y), extents.y + free_h);
+        break;
+    case WLMTK_PLACEMENT_RANDOM:
+        px = extents.x + (free_w > 0 ? rand() % (free_w + 1) : 0);
+        py = extents.y + (free_h > 0 ? rand() % (free_h + 1) : 0);
+        break;
+    case WLMTK_PLACEMENT_CASCADE:
+        placed = false;
+        goto cascade;
+    default:
+        placed = false;
+        break;
+    }
+    if (placed) {
+        wlmtk_element_set_position(
+            wlmtk_window_element(window_ptr), px + dx, py + dy);
+        wlmtk_window_position_changed(window_ptr);
+        return;
+    }
+
     // Search within the usable area (it may start below a panel bar).
     int x = BS_MAX(wbox.x, extents.x);
     for (wbox.y = BS_MAX(wbox.y, extents.y);
@@ -1333,6 +1530,8 @@ void _wlmtk_workspace_place_window(wlmtk_workspace_t *workspace_ptr,
         }
     }
 
+cascade:
+    ;
     const unsigned n = _wlmtk_workspace_placement_step;
     unsigned max_steps = BS_MAX(
         1u, BS_MIN(extents.width / n - 2, extents.height / n - 2));
@@ -1355,6 +1554,9 @@ bool pfsm_move_begin(wlmtk_fsm_t *fsm_ptr, void *ud_ptr)
     workspace_ptr->motion_y =
         workspace_ptr->super_container.super_element.last_pointer_motion_event.y;
 
+    // Dragging a tiled window gives it back its own size.
+    wlmtk_window_untile_for_move(workspace_ptr->grabbed_window_ptr,
+                                 (int)workspace_ptr->motion_x);
     wlmtk_element_get_position(
         wlmtk_window_element(workspace_ptr->grabbed_window_ptr),
         &workspace_ptr->initial_x,
@@ -1385,7 +1587,95 @@ bool pfsm_move_motion(wlmtk_fsm_t *fsm_ptr, __UNUSED__ void *ud_ptr)
         workspace_ptr->initial_x + rel_x,
         workspace_ptr->initial_y + rel_y);
 
+    // Snapping: Pointer at an edge (half) or corner (quarter) of its output.
+    const wlmtk_behavior_t *b_ptr = wlmtk_behavior_get();
+    uint32_t edges = 0;
+    bool maximize = false;
+    struct wlr_output *wlr_output_ptr = NULL;
+    double px =
+        workspace_ptr->super_container.super_element.last_pointer_motion_event.x;
+    double py =
+        workspace_ptr->super_container.super_element.last_pointer_motion_event.y;
+    if (b_ptr->snapping && NULL != workspace_ptr->wlr_output_layout_ptr &&
+        wlmtk_window_is_resizable(workspace_ptr->grabbed_window_ptr)) {
+        wlr_output_ptr = wlr_output_layout_output_at(
+            workspace_ptr->wlr_output_layout_ptr, px, py);
+    }
+    if (NULL != wlr_output_ptr) {
+        struct wlr_box o;
+        wlr_output_layout_get_box(workspace_ptr->wlr_output_layout_ptr,
+                                  wlr_output_ptr, &o);
+        int d = b_ptr->snap_distance;
+        if (px < o.x + d) edges |= WLR_EDGE_LEFT;
+        else if (px >= o.x + o.width - d) edges |= WLR_EDGE_RIGHT;
+        if (py < o.y + d) edges |= WLR_EDGE_TOP;
+        else if (py >= o.y + o.height - d) edges |= WLR_EDGE_BOTTOM;
+        if (WLR_EDGE_TOP == edges && b_ptr->snap_top_maximizes) {
+            maximize = true;
+        }
+    }
+    _wlmtk_workspace_set_snap_preview(
+        workspace_ptr, wlr_output_ptr, edges, maximize);
     return true;
+}
+
+/* ------------------------------------------------------------------------- */
+/** Move ends with the button released: Snaps, if the pointer is at an edge. */
+bool pfsm_move_release(wlmtk_fsm_t *fsm_ptr, void *ud_ptr)
+{
+    wlmtk_workspace_t *workspace_ptr = BS_CONTAINER_OF(
+        fsm_ptr, wlmtk_workspace_t, fsm);
+    wlmtk_window_t *window_ptr = workspace_ptr->grabbed_window_ptr;
+    if (NULL != window_ptr) {
+        if (workspace_ptr->snap_maximize) {
+            wlmtk_window_request_maximized(window_ptr, true);
+        } else if (0 != workspace_ptr->snap_edges) {
+            wlmtk_window_request_tiled(window_ptr, workspace_ptr->snap_edges);
+        }
+    }
+    return pfsm_reset(fsm_ptr, ud_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+/** Shows (or, with no edges, hides) the preview of where a window snaps. */
+void _wlmtk_workspace_set_snap_preview(
+    wlmtk_workspace_t *workspace_ptr,
+    struct wlr_output *wlr_output_ptr,
+    uint32_t edges,
+    bool maximize)
+{
+    workspace_ptr->snap_edges = edges;
+    workspace_ptr->snap_maximize = maximize;
+    if (0 == edges && !maximize) {
+        if (NULL != workspace_ptr->snap_preview_ptr) {
+            wlmtk_element_t *e = wlmtk_rectangle_element(
+                workspace_ptr->snap_preview_ptr);
+            if (NULL != e->parent_container_ptr) {
+                wlmtk_container_remove_element(e->parent_container_ptr, e);
+            }
+            wlmtk_rectangle_destroy(workspace_ptr->snap_preview_ptr);
+            workspace_ptr->snap_preview_ptr = NULL;
+        }
+        return;
+    }
+    struct wlr_box box = maximize ?
+        wlmtk_workspace_get_maximize_extents(workspace_ptr, wlr_output_ptr) :
+        wlmtk_workspace_get_tile_extents(workspace_ptr, wlr_output_ptr, edges);
+    if (NULL == workspace_ptr->snap_preview_ptr) {
+        // Translucent, in the highlight blue of selections.
+        workspace_ptr->snap_preview_ptr = wlmtk_rectangle_create(
+            box.width, box.height, 0x5a3c78c8);
+        if (NULL == workspace_ptr->snap_preview_ptr) return;
+        wlmtk_element_t *e = wlmtk_rectangle_element(
+            workspace_ptr->snap_preview_ptr);
+        wlmtk_container_add_element(&workspace_ptr->super_container, e);
+        wlmtk_element_set_visible(e, true);
+    }
+    wlmtk_rectangle_set_size(workspace_ptr->snap_preview_ptr,
+                             box.width, box.height);
+    wlmtk_element_set_position(
+        wlmtk_rectangle_element(workspace_ptr->snap_preview_ptr),
+        box.x, box.y);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1467,6 +1757,7 @@ bool pfsm_reset(wlmtk_fsm_t *fsm_ptr, __UNUSED__ void *ud_ptr)
 {
     wlmtk_workspace_t *workspace_ptr = BS_CONTAINER_OF(
         fsm_ptr, wlmtk_workspace_t, fsm);
+    _wlmtk_workspace_set_snap_preview(workspace_ptr, NULL, 0, false);
 
     wlmtk_window_set_resize_edges(workspace_ptr->grabbed_window_ptr, 0);
 
@@ -1486,6 +1777,7 @@ static void test_activate(bs_test_t *test_ptr);
 static void test_activate_cycling(bs_test_t *test_ptr);
 static void test_minimize_restore(bs_test_t *test_ptr);
 static void test_raise_fullscreen(bs_test_t *test_ptr);
+static void test_layers_tiles_transfer(bs_test_t *test_ptr);
 static void test_multi_output_extents(bs_test_t *test_ptr);
 static void test_multi_output_reposition(bs_test_t *test_ptr);
 static void test_window_position(bs_test_t *test_ptr);
@@ -1507,6 +1799,7 @@ static const bs_test_case_t _wlmtk_workspace_test_cases[] = {
     { 1, "activate_cycling", test_activate_cycling },
     { 1, "minimize_restore", test_minimize_restore },
     { 1, "raise_fullscreen", test_raise_fullscreen },
+    { 1, "layers_tiles_transfer", test_layers_tiles_transfer },
     { 1, "multi_output_extents", test_multi_output_extents },
     { 1, "multi_output_reposition", test_multi_output_reposition },
     { 1, "window_position", test_window_position },
@@ -2141,6 +2434,87 @@ void test_minimize_restore(bs_test_t *test_ptr)
     wlmtk_element_destroy(&fe2_ptr->element);
     wlmtk_window_destroy(w1);
     wlmtk_element_destroy(&fe1_ptr->element);
+    wlmtk_workspace_destroy(ws_ptr);
+    wl_display_destroy(display_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+/** Keep on top / at bottom, lowering, tile extents and quiet transfers. */
+void test_layers_tiles_transfer(bs_test_t *test_ptr)
+{
+    struct wl_display *display_ptr = wl_display_create();
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, display_ptr);
+    struct wlr_output_layout *wlr_output_layout_ptr =
+        wlr_output_layout_create(display_ptr);
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, wlr_output_layout_ptr);
+    struct wlr_output output = { .width = 1024, .height = 768, .scale = 1 };
+    wlmtk_test_wlr_output_init(&output);
+    wlr_output_layout_add(wlr_output_layout_ptr, &output, 0, 0);
+
+    wlmtk_workspace_t *ws_ptr = wlmtk_workspace_create(
+        wlr_output_layout_ptr, "t", &_wlmtk_workspace_test_tile_style);
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, ws_ptr);
+    wlmtk_element_set_visible(wlmtk_workspace_element(ws_ptr), true);
+    wlmtk_workspace_enable(ws_ptr, true);
+    wlmtk_workspace_t *ws2_ptr = wlmtk_workspace_create(
+        wlr_output_layout_ptr, "t2", &_wlmtk_workspace_test_tile_style);
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, ws2_ptr);
+
+    wlmtk_fake_element_t *fe1_ptr = wlmtk_fake_element_create();
+    wlmtk_window_t *w1 = wlmtk_test_window_create(&fe1_ptr->element);
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, w1);
+    wlmtk_workspace_map_window(ws_ptr, w1);
+    wlmtk_fake_element_t *fe2_ptr = wlmtk_fake_element_create();
+    wlmtk_window_t *w2 = wlmtk_test_window_create(&fe2_ptr->element);
+    BS_TEST_VERIFY_NEQ_OR_RETURN(test_ptr, NULL, w2);
+    wlmtk_workspace_map_window(ws_ptr, w2);
+    bs_dllist_t *elements_ptr = &ws_ptr->window_container.elements;
+    BS_TEST_VERIFY_EQ(test_ptr, wlmtk_dlnode_from_element(
+                          wlmtk_window_element(w2)), elements_ptr->head_ptr);
+
+    // Keep w1 on top: It goes above w2, and stays there when w2 is raised.
+    wlmtk_window_set_keep_on_top(w1, true);
+    BS_TEST_VERIFY_EQ(test_ptr, wlmtk_dlnode_from_element(
+                          wlmtk_window_element(w1)), elements_ptr->head_ptr);
+    wlmtk_workspace_raise_window(ws_ptr, w2);
+    BS_TEST_VERIFY_EQ(test_ptr, wlmtk_dlnode_from_element(
+                          wlmtk_window_element(w1)), elements_ptr->head_ptr);
+    // Keep it at the bottom instead (clears on-top), lowering w2 stays above.
+    wlmtk_window_set_keep_at_bottom(w1, true);
+    BS_TEST_VERIFY_FALSE(test_ptr, wlmtk_window_is_keep_on_top(w1));
+    wlmtk_workspace_lower_window(ws_ptr, w2);
+    BS_TEST_VERIFY_EQ(test_ptr, wlmtk_dlnode_from_element(
+                          wlmtk_window_element(w1)), elements_ptr->tail_ptr);
+    wlmtk_window_set_keep_at_bottom(w1, false);
+
+    // Tile extents: Halves & quarters of the area for maximized windows.
+    struct wlr_box m = wlmtk_workspace_get_maximize_extents(ws_ptr, NULL);
+    struct wlr_box b = wlmtk_workspace_get_tile_extents(
+        ws_ptr, NULL, WLR_EDGE_LEFT);
+    BS_TEST_VERIFY_EQ(test_ptr, m.x, b.x);
+    BS_TEST_VERIFY_EQ(test_ptr, m.width / 2, b.width);
+    BS_TEST_VERIFY_EQ(test_ptr, m.height, b.height);
+    b = wlmtk_workspace_get_tile_extents(
+        ws_ptr, NULL, WLR_EDGE_BOTTOM | WLR_EDGE_RIGHT);
+    BS_TEST_VERIFY_EQ(test_ptr, m.x + m.width / 2, b.x);
+    BS_TEST_VERIFY_EQ(test_ptr, m.y + m.height / 2, b.y);
+    BS_TEST_VERIFY_EQ(test_ptr, m.width - m.width / 2, b.width);
+    BS_TEST_VERIFY_EQ(test_ptr, m.height - m.height / 2, b.height);
+
+    // Transfer: Without unmapping, onto the other workspace.
+    wlmtk_workspace_transfer_window(ws2_ptr, w1);
+    BS_TEST_VERIFY_EQ(test_ptr, ws2_ptr, wlmtk_window_get_workspace(w1));
+    BS_TEST_VERIFY_EQ(test_ptr, 1, bs_dllist_size(&ws_ptr->windows));
+    BS_TEST_VERIFY_EQ(test_ptr, 1, bs_dllist_size(&ws2_ptr->windows));
+    wlmtk_workspace_transfer_window(ws_ptr, w1);
+
+    wlmtk_workspace_unmap_window(ws_ptr, w2);
+    wlmtk_window_destroy(w2);
+    wlmtk_element_destroy(&fe2_ptr->element);
+    wlmtk_workspace_unmap_window(ws_ptr, w1);
+    wlmtk_window_destroy(w1);
+    wlmtk_element_destroy(&fe1_ptr->element);
+    wlmtk_workspace_destroy(ws2_ptr);
     wlmtk_workspace_destroy(ws_ptr);
     wl_display_destroy(display_ptr);
 }
