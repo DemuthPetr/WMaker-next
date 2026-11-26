@@ -127,15 +127,18 @@ bspl_dict_t *wlmaker_config_load(
     wlmaker_files_t *files_ptr,
     const char *fname_ptr)
 {
-    return BS_ASSERT_NOTNULL(
-        bspl_dict_from_object(
-            wlmaker_config_object_load(
-                files_ptr,
-                "wlmaker config",
-                fname_ptr,
-                "Config.plist",
-                embedded_binary_default_configuration_data,
-                embedded_binary_default_configuration_size)));
+    // NULL on errors (eg. a typo in the file): At startup, main() reports
+    // it; a reload (SIGHUP) keeps what it has.
+    bspl_object_t *object_ptr = wlmaker_config_object_load(
+        files_ptr,
+        "wlmaker config",
+        fname_ptr,
+        "Config.plist",
+        embedded_binary_default_configuration_data,
+        embedded_binary_default_configuration_size);
+    bspl_dict_t *dict_ptr = bspl_dict_from_object(object_ptr);
+    if (NULL == dict_ptr && NULL != object_ptr) bspl_object_unref(object_ptr);
+    return dict_ptr;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -143,15 +146,18 @@ bspl_dict_t *wlmaker_state_load(
     wlmaker_files_t *files_ptr,
     const char *fname_ptr)
 {
-    return BS_ASSERT_NOTNULL(
-        bspl_dict_from_object(
-            wlmaker_config_object_load(
-                files_ptr,
-                "wlmaker state",
-                fname_ptr,
-                "State.plist",
-                embedded_binary_default_state_data,
-                embedded_binary_default_state_size)));
+    // NULL on errors (eg. a typo in the file): At startup, main() reports
+    // it; a reload (SIGHUP) keeps what it has.
+    bspl_object_t *object_ptr = wlmaker_config_object_load(
+        files_ptr,
+        "wlmaker state",
+        fname_ptr,
+        "State.plist",
+        embedded_binary_default_state_data,
+        embedded_binary_default_state_size);
+    bspl_dict_t *dict_ptr = bspl_dict_from_object(object_ptr);
+    if (NULL == dict_ptr && NULL != object_ptr) bspl_object_unref(object_ptr);
+    return dict_ptr;
 }
 
 /* ------------------------------------------------------------------------- */
