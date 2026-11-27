@@ -1745,14 +1745,16 @@ void _wlmtk_workspace_set_snap_preview(
     workspace_ptr->snap_edges = edges;
     workspace_ptr->snap_maximize = maximize;
     if (0 == edges && !maximize) {
-        if (NULL != workspace_ptr->snap_preview_ptr) {
-            wlmtk_element_t *e = wlmtk_rectangle_element(
-                workspace_ptr->snap_preview_ptr);
+        // Forget it first: Removing it may move the pointer focus, which can
+        // reset the move -- and get here again (re-entrant).
+        wlmtk_rectangle_t *preview_ptr = workspace_ptr->snap_preview_ptr;
+        workspace_ptr->snap_preview_ptr = NULL;
+        if (NULL != preview_ptr) {
+            wlmtk_element_t *e = wlmtk_rectangle_element(preview_ptr);
             if (NULL != e->parent_container_ptr) {
                 wlmtk_container_remove_element(e->parent_container_ptr, e);
             }
-            wlmtk_rectangle_destroy(workspace_ptr->snap_preview_ptr);
-            workspace_ptr->snap_preview_ptr = NULL;
+            wlmtk_rectangle_destroy(preview_ptr);
         }
         return;
     }
@@ -1788,15 +1790,16 @@ void _wlmtk_workspace_show_geometry(
 {
     if (NULL == text_ptr || NULL == workspace_ptr->grabbed_window_ptr ||
         !wlmtk_behavior_get()->show_geometry) {
-        if (NULL != workspace_ptr->geometry_ptr) {
-            wlmtk_element_t *e = wlmtk_buffer_element(
-                workspace_ptr->geometry_ptr);
+        // Forget it first: See _wlmtk_workspace_set_snap_preview.
+        wlmtk_buffer_t *geometry_ptr = workspace_ptr->geometry_ptr;
+        workspace_ptr->geometry_ptr = NULL;
+        if (NULL != geometry_ptr) {
+            wlmtk_element_t *e = wlmtk_buffer_element(geometry_ptr);
             if (NULL != e->parent_container_ptr) {
                 wlmtk_container_remove_element(e->parent_container_ptr, e);
             }
-            wlmtk_buffer_fini(workspace_ptr->geometry_ptr);
-            free(workspace_ptr->geometry_ptr);
-            workspace_ptr->geometry_ptr = NULL;
+            wlmtk_buffer_fini(geometry_ptr);
+            free(geometry_ptr);
         }
         return;
     }
@@ -1949,7 +1952,11 @@ bool pfsm_reset(wlmtk_fsm_t *fsm_ptr, __UNUSED__ void *ud_ptr)
     _wlmtk_workspace_set_snap_preview(workspace_ptr, NULL, 0, false);
     _wlmtk_workspace_show_geometry(workspace_ptr, NULL);
 
-    wlmtk_window_set_resize_edges(workspace_ptr->grabbed_window_ptr, 0);
+    // A nested reset (eg. from removing the preview, above) may have
+    // released the window already.
+    if (NULL != workspace_ptr->grabbed_window_ptr) {
+        wlmtk_window_set_resize_edges(workspace_ptr->grabbed_window_ptr, 0);
+    }
 
     workspace_ptr->grabbed_window_ptr = NULL;
     return true;
