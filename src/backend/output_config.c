@@ -19,6 +19,7 @@
 #include <wlr/types/wlr_output_layout.h>
 #undef WLR_USE_UNSTABLE
 
+#include "backend.h"
 #include "toolkit/toolkit.h"
 
 /* == Declarations ========================================================= */
@@ -101,6 +102,9 @@ static const bspl_desc_t    _wlmbe_output_config_desc[] = {
     BSPL_DESC_BOOL(
         "Enabled", false, wlmbe_output_config_t,
         attributes.enabled, attributes.enabled, true),
+    BSPL_DESC_BOOL(
+        "Primary", false, wlmbe_output_config_t,
+        attributes.primary, attributes.primary, false),
     BSPL_DESC_CUSTOM(
         "Position", false, wlmbe_output_config_t,
         attributes.position, attributes.has_position,
@@ -416,6 +420,13 @@ struct wlr_output *wlmbe_output_description_first_fnmatch(
     wlmbe_output_description_t *desc_ptr,
     struct wlr_output_layout *wlr_output_layout_ptr)
 {
+    // The primary output first: A wildcard ("*") means the primary one.
+    struct wlr_output *primary_ptr = wlmbe_primary_output(wlr_output_layout_ptr);
+    if (NULL != primary_ptr &&
+        wlmbe_output_description_fnmatches(desc_ptr, primary_ptr)) {
+        return primary_ptr;
+    }
+
     struct wl_list *link_ptr;
     for (link_ptr = wlr_output_layout_ptr->outputs.next;
          link_ptr != &wlr_output_layout_ptr->outputs;
@@ -540,7 +551,8 @@ bool _wlmbe_output_mode_decode(
     }
     wlmbe_output_config_mode_t *mode_ptr = value_ptr;
     *mode_ptr = (wlmbe_output_config_mode_t){
-        .width = w, .height = h, .refresh = r * 1000  // Hz -> mHz.
+        .width = w, .height = h,
+        .refresh = (int32_t)(r * 1000 + 0.5)  // Hz -> mHz, rounded.
     };
     return true;
 }

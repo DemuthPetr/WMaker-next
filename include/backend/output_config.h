@@ -85,6 +85,8 @@ typedef struct {
 
     /** Whether this output is enabled. */
     bool                      enabled;
+    /** Whether this is the primary output: Holds dock, clip and icons. */
+    bool                      primary;
 
     /** Position of this output. */
     wlmbe_output_config_position_t position;

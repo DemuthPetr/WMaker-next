@@ -138,6 +138,9 @@ static void _wlmbe_backend_config_dlnode_destroy(
 
 /* == Data ================================================================= */
 
+/** The configured outputs, for @ref wlmbe_primary_output. */
+static bs_dllist_t *_wlmbe_output_configs_ptr = NULL;
+
 /** Descriptor for the output configuration. */
 static const bspl_desc_t _wlmbe_output_configs_desc[] = {
     BSPL_DESC_ARRAY("Outputs", true, wlmbe_backend_t,
@@ -196,6 +199,7 @@ wlmbe_backend_t *wlmbe_backend_create(
         wlmbe_backend_destroy(backend_ptr);
         return NULL;
     }
+    _wlmbe_output_configs_ptr = &backend_ptr->output_configs;
 
     // Loads state (if available).
     backend_ptr->state_fname_ptr = logged_strdup(state_fname_ptr);
@@ -310,6 +314,9 @@ wlmbe_backend_t *wlmbe_backend_create(
 /* ------------------------------------------------------------------------- */
 void wlmbe_backend_destroy(wlmbe_backend_t *backend_ptr)
 {
+    if (_wlmbe_output_configs_ptr == &backend_ptr->output_configs) {
+        _wlmbe_output_configs_ptr = NULL;
+    }
     wlmtk_util_disconnect_listener(&backend_ptr->new_output_listener);
 
     if (NULL != backend_ptr->output_manager_ptr) {
@@ -373,6 +380,21 @@ struct wlr_output *wlmbe_primary_output(
 {
     if (0 >= wl_list_length(&wlr_output_layout_ptr->outputs)) return NULL;
 
+    // The first output whose configuration says "Primary".
+    if (NULL != _wlmbe_output_configs_ptr) {
+        struct wlr_output_layout_output *l_ptr;
+        wl_list_for_each(l_ptr, &wlr_output_layout_ptr->outputs, link) {
+            wlmbe_output_config_t *config_ptr = wlmbe_output_config_from_dlnode(
+                bs_dllist_find(_wlmbe_output_configs_ptr,
+                               wlmbe_output_config_fnmatches,
+                               l_ptr->output));
+            if (NULL != config_ptr &&
+                wlmbe_output_config_attributes(config_ptr)->primary) {
+                return l_ptr->output;
+            }
+        }
+    }
+
     struct wlr_output_layout_output* wolo = BS_CONTAINER_OF(
         wlr_output_layout_ptr->outputs.next,
         struct wlr_output_layout_output,
@@ -417,6 +439,10 @@ bool wlmbe_backend_reconfigure(
     backend_ptr->output_configs = decoded.output_configs;
     wlmbe_output_manager_apply_configs(
         backend_ptr->output_manager_ptr, &backend_ptr->output_configs);
+    // The primary output may have changed, without the layout changing:
+    // Have dock, clip & co re-attach.
+    wl_signal_emit(&backend_ptr->wlr_output_layout_ptr->events.change,
+                   backend_ptr->wlr_output_layout_ptr);
     return true;
 }
 
@@ -798,6 +824,7 @@ void _wlmbe_backend_test_encode_output_configs(bs_test_t *test_ptr)
         "      Enabled = False;\n"
         "      Mode = \"1024x768@60.0\";\n"
         "      Name = Name0;\n"
+        "      Primary = False;\n"
         "      Scale = \"2.000000e+00\";\n"
         "      Transformation = Normal;\n"
         "    },\n"
@@ -805,6 +832,7 @@ void _wlmbe_backend_test_encode_output_configs(bs_test_t *test_ptr)
         "      Enabled = True;\n"
         "      Mode = \"640x480@80.0\";\n"
         "      Name = Name1;\n"
+        "      Primary = False;\n"
         "      Scale = \"1.000000e+00\";\n"
         "      Transformation = Normal;\n"
         "    }\n"
