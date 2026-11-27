@@ -57,6 +57,7 @@
 #include "task_list.h"
 #include "window_rules.h"
 #include "popup_menu.h"
+#include "session.h"
 #include "tooltip.h"
 #include "toolkit/toolkit.h"
 
@@ -623,6 +624,34 @@ static void _wlmaker_reload_state(wlmaker_server_t *server_ptr)
 
 /* ------------------------------------------------------------------------- */
 /**
+ * SIGTERM, eg. when the login manager ends the session: Saves the session if
+ * so configured, then shuts down as for the "Quit" action.
+ */
+static int _wlmaker_handle_sigterm(__UNUSED__ int signal_number, void *data_ptr)
+{
+    wlmaker_server_t *server_ptr = data_ptr;
+    bs_log(BS_INFO, "SIGTERM: Ending the session.");
+    if (NULL != server_ptr->session_ptr &&
+        wlmaker_session_save_on_exit(server_ptr->session_ptr)) {
+        wlmaker_session_save(server_ptr->session_ptr);
+    }
+    wl_display_terminate(server_ptr->wl_display_ptr);
+    return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/** SIGUSR1: Saves the session now (wmaker-next-settings' "Save session now"). */
+static int _wlmaker_handle_sigusr1(__UNUSED__ int signal_number, void *data_ptr)
+{
+    wlmaker_server_t *server_ptr = data_ptr;
+    if (NULL != server_ptr->session_ptr) {
+        wlmaker_session_save(server_ptr->session_ptr);
+    }
+    return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/**
  * Handles SIGHUP: Re-reads configuration and state, and applies them. Sent
  * by wmaker-next-settings, so changes show without restarting the session.
  */
@@ -964,12 +993,20 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     // Before the taskbar & others listen to mapping: They see the attributes.
     wlmaker_window_rules_ptr = wlmaker_window_rules_create(
         server_ptr, config_dict_ptr);
+    // After the rules: A restored window's saved place wins.
+    server_ptr->session_ptr = wlmaker_session_create(server_ptr);
 
     _wlmaker_apply_effects(server_ptr, config_dict_ptr);
     _wlmaker_apply_windows(server_ptr, config_dict_ptr);
     struct wl_event_source *sighup_source_ptr = wl_event_loop_add_signal(
         wl_display_get_event_loop(server_ptr->wl_display_ptr),
         SIGHUP, _wlmaker_handle_sighup, server_ptr);
+    struct wl_event_source *sigterm_source_ptr = wl_event_loop_add_signal(
+        wl_display_get_event_loop(server_ptr->wl_display_ptr),
+        SIGTERM, _wlmaker_handle_sigterm, server_ptr);
+    struct wl_event_source *sigusr1_source_ptr = wl_event_loop_add_signal(
+        wl_display_get_event_loop(server_ptr->wl_display_ptr),
+        SIGUSR1, _wlmaker_handle_sigusr1, server_ptr);
 
     // TODO(kaeser@gubbe.ch): Uh, that's ugly...
     server_ptr->root_menu_ptr = wlmaker_root_menu_create(
@@ -1068,10 +1105,16 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
         wlmaker_foreign_toplevel_destroy(foreign_toplevel_ptr);
     }
     if (NULL != sighup_source_ptr) wl_event_source_remove(sighup_source_ptr);
+    if (NULL != sigterm_source_ptr) wl_event_source_remove(sigterm_source_ptr);
+    if (NULL != sigusr1_source_ptr) wl_event_source_remove(sigusr1_source_ptr);
     if (NULL != wlmaker_window_rules_ptr) {
         wlmaker_window_rules_destroy(wlmaker_window_rules_ptr);
     }
     wlmaker_tooltip_fini();
+    if (NULL != server_ptr->session_ptr) {
+        wlmaker_session_destroy(server_ptr->session_ptr);
+        server_ptr->session_ptr = NULL;
+    }
     if (NULL != server_ptr->popup_menu_ptr) {
         wlmaker_popup_menu_destroy(server_ptr->popup_menu_ptr);
         server_ptr->popup_menu_ptr = NULL;

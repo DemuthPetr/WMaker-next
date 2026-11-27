@@ -48,6 +48,7 @@
 #include "input/manager.h"
 #include "root_menu.h"
 #include "server.h"
+#include "session.h"
 #include "subprocess_monitor.h"
 #include "toolkit/toolkit.h"
 
@@ -167,6 +168,8 @@ const bspl_enum_desc_t wlmaker_action_desc[] = {
     BSPL_ENUM("WindowKill", WLMAKER_ACTION_WINDOW_KILL),
     BSPL_ENUM("WindowAttributes", WLMAKER_ACTION_WINDOW_ATTRIBUTES),
     BSPL_ENUM("WindowAddToDock", WLMAKER_ACTION_WINDOW_ADD_TO_DOCK),
+    BSPL_ENUM("SessionSave", WLMAKER_ACTION_SESSION_SAVE),
+    BSPL_ENUM("SessionClear", WLMAKER_ACTION_SESSION_CLEAR),
     BSPL_ENUM("WindowTileLeft", WLMAKER_ACTION_WINDOW_TILE_LEFT),
     BSPL_ENUM("WindowTileRight", WLMAKER_ACTION_WINDOW_TILE_RIGHT),
     BSPL_ENUM("WindowTileTop", WLMAKER_ACTION_WINDOW_TILE_TOP),
@@ -270,6 +273,10 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
         break;
 
     case WLMAKER_ACTION_QUIT:
+        if (NULL != server_ptr->session_ptr &&
+            wlmaker_session_save_on_exit(server_ptr->session_ptr)) {
+            wlmaker_session_save(server_ptr->session_ptr);
+        }
         wl_display_terminate(server_ptr->wl_display_ptr);
         break;
 
@@ -305,6 +312,18 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
         wlmaker_subprocess_monitor_run(
             server_ptr->monitor_ptr,
             bs_subprocess_create_cmdline(arg_ptr));
+        break;
+
+    case WLMAKER_ACTION_SESSION_SAVE:
+        if (NULL != server_ptr->session_ptr) {
+            wlmaker_session_save(server_ptr->session_ptr);
+        }
+        break;
+
+    case WLMAKER_ACTION_SESSION_CLEAR:
+        if (NULL != server_ptr->session_ptr) {
+            wlmaker_session_clear(server_ptr->session_ptr);
+        }
         break;
 
     case WLMAKER_ACTION_WINDOW_ADD_TO_DOCK: {

@@ -186,6 +186,8 @@ struct _wlmaker_server_t {
     wlmaker_window_list_t     *window_list_ptr;
     /** Context menu at the pointer: Dock launchers, clip. */
     struct _wlmaker_popup_menu_t *popup_menu_ptr;
+    /** Session saving & restoring. */
+    struct _wlmaker_session_t *session_ptr;
     /** Parsed contents of the root menu definition, from plist. */
     bspl_array_t            *root_menu_array_ptr;
     /** Listener for `unclaimed_button_event` signal raised by `wlmtk_root`. */
