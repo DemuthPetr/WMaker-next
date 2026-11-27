@@ -433,8 +433,10 @@ void _wlmtk_dock_arrange(wlmtk_dock_t *dock_ptr)
     if (per_line < 1) per_line = 1;
     bool edge_at_end = WLR_EDGE_RIGHT == dock_ptr->dock_positioning.edge ||
         WLR_EDGE_BOTTOM == dock_ptr->dock_positioning.edge;
+    // Centered: Filled from the start, as the top or left anchors.
     bool anchor_at_start = WLR_EDGE_TOP == dock_ptr->dock_positioning.anchor ||
-        WLR_EDGE_LEFT == dock_ptr->dock_positioning.anchor;
+        WLR_EDGE_LEFT == dock_ptr->dock_positioning.anchor ||
+        WLR_EDGE_NONE == dock_ptr->dock_positioning.anchor;
     int size = 0;
     if (NULL != dock_ptr->tiles.head_ptr) {
         size = wlmtk_tile_from_dlnode(dock_ptr->tiles.head_ptr)->style.size;
@@ -527,8 +529,10 @@ bool _wlmtk_dock_positioning(
         panel_positioning_ptr->anchor = dock_ptr->dock_positioning.edge;
         panel_positioning_ptr->desired_width = BS_MAX(box.width, 1);
 
+        // WLR_EDGE_NONE: Centered along the edge.
         if (dock_ptr->dock_positioning.anchor != WLR_EDGE_TOP &&
-            dock_ptr->dock_positioning.anchor != WLR_EDGE_BOTTOM) {
+            dock_ptr->dock_positioning.anchor != WLR_EDGE_BOTTOM &&
+            dock_ptr->dock_positioning.anchor != WLR_EDGE_NONE) {
             bs_log(BS_ERROR, "wlmtk_dock_t anchor must be adjacent to edge: "
                    "anchor %"PRIx32", edge %"PRIx32,
                    dock_ptr->dock_positioning.anchor,
@@ -547,8 +551,10 @@ bool _wlmtk_dock_positioning(
     case WLR_EDGE_BOTTOM:
         panel_positioning_ptr->anchor = dock_ptr->dock_positioning.edge;
         panel_positioning_ptr->desired_height = BS_MAX(box.height, 1);
+        // WLR_EDGE_NONE: Centered along the edge.
         if (dock_ptr->dock_positioning.anchor != WLR_EDGE_LEFT &&
-            dock_ptr->dock_positioning.anchor != WLR_EDGE_RIGHT) {
+            dock_ptr->dock_positioning.anchor != WLR_EDGE_RIGHT &&
+            dock_ptr->dock_positioning.anchor != WLR_EDGE_NONE) {
             bs_log(BS_ERROR, "wlmtk_dock_t anchor must be adjacent to edge: "
                    "anchor %"PRIx32", edge %"PRIx32,
                    dock_ptr->dock_positioning.anchor,

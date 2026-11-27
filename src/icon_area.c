@@ -148,6 +148,16 @@ static const bspl_enum_desc_t _wlmaker_icon_area_edges[] = {
     BSPL_ENUM_SENTINEL(),
 };
 
+/** Enum descriptor for the anchor along the edge: A corner, or the middle. */
+static const bspl_enum_desc_t _wlmaker_icon_area_anchors[] = {
+    BSPL_ENUM("TOP", WLR_EDGE_TOP),
+    BSPL_ENUM("BOTTOM", WLR_EDGE_BOTTOM),
+    BSPL_ENUM("LEFT", WLR_EDGE_LEFT),
+    BSPL_ENUM("RIGHT", WLR_EDGE_RIGHT),
+    BSPL_ENUM("CENTER", WLR_EDGE_NONE),
+    BSPL_ENUM_SENTINEL(),
+};
+
 /** Enum descriptor for the order of mini-windows. */
 static const bspl_enum_desc_t _wlmaker_icon_area_sorts[] = {
     BSPL_ENUM("Minimized", 0),
@@ -168,7 +178,7 @@ static const bspl_desc_t _wlmaker_icon_area_desc[] = {
     BSPL_DESC_ENUM("Edge", false, wlmtk_dock_positioning_t, edge, edge,
                    WLR_EDGE_BOTTOM, _wlmaker_icon_area_edges),
     BSPL_DESC_ENUM("Anchor", false, wlmtk_dock_positioning_t, anchor, anchor,
-                   WLR_EDGE_LEFT, _wlmaker_icon_area_edges),
+                   WLR_EDGE_LEFT, _wlmaker_icon_area_anchors),
     BSPL_DESC_SENTINEL(),
 };
 
