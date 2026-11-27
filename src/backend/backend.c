@@ -375,6 +375,18 @@ struct wlr_compositor *wlmbe_backend_compositor(wlmbe_backend_t *backend_ptr)
 }
 
 /* ------------------------------------------------------------------------- */
+struct wlr_renderer *wlmbe_backend_renderer(wlmbe_backend_t *backend_ptr)
+{
+    return backend_ptr->wlr_renderer_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
+struct wlr_allocator *wlmbe_backend_allocator(wlmbe_backend_t *backend_ptr)
+{
+    return backend_ptr->wlr_allocator_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
 struct wlr_output *wlmbe_primary_output(
     struct wlr_output_layout *wlr_output_layout_ptr)
 {

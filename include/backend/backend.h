@@ -29,6 +29,10 @@
 struct wl_display;
 struct wlr_output_layout;
 struct wlr_scene;
+struct wlr_renderer;
+struct wlr_allocator;
+struct wlr_compositor;
+struct wlr_backend;
 
 /** Forward declaration. */
 typedef struct _wlmbe_backend_t wlmbe_backend_t;
@@ -80,6 +84,10 @@ void wlmbe_backend_switch_to_vt(wlmbe_backend_t *backend_ptr, unsigned vt_num);
 struct wlr_backend *wlmbe_backend_wlr(wlmbe_backend_t *backend_ptr);
 /** Accessor. TODO(kaeser@gubbe.ch): Eliminate. */
 struct wlr_compositor *wlmbe_backend_compositor(wlmbe_backend_t *backend_ptr);
+/** Accessor: The renderer, eg. for rendering window thumbnails. */
+struct wlr_renderer *wlmbe_backend_renderer(wlmbe_backend_t *backend_ptr);
+/** Accessor: The buffer allocator, eg. for window thumbnails. */
+struct wlr_allocator *wlmbe_backend_allocator(wlmbe_backend_t *backend_ptr);
 
 /**
  * Returns the primary output. Currently that is the first output found
