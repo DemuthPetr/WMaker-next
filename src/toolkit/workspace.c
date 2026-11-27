@@ -980,6 +980,41 @@ void wlmtk_workspace_activate_previous_window(
 }
 
 /* ------------------------------------------------------------------------- */
+void wlmtk_workspace_activate_window_in_order(
+    wlmtk_workspace_t *workspace_ptr,
+    bool forward)
+{
+    wlmtk_window_t *active_ptr = workspace_ptr->activated_window_ptr;
+    uint64_t current = (NULL != active_ptr) ?
+        wlmtk_window_get_serial(active_ptr) : 0;
+    // The window with the closest serial after (before) the current one;
+    // else wrap around to the first (last).
+    wlmtk_window_t *best_ptr = NULL, *wrap_ptr = NULL;
+    for (bs_dllist_node_t *dlnode_ptr = workspace_ptr->windows.head_ptr;
+         NULL != dlnode_ptr;
+         dlnode_ptr = dlnode_ptr->next_ptr) {
+        wlmtk_window_t *w = wlmtk_window_from_dlnode(dlnode_ptr);
+        if (_wlmtk_workspace_skip_cycling(w) || w == active_ptr) continue;
+        uint64_t s = wlmtk_window_get_serial(w);
+        bool after = forward ? s > current : s < current;
+        if (after && (NULL == best_ptr ||
+                      (forward ? s < wlmtk_window_get_serial(best_ptr) :
+                       s > wlmtk_window_get_serial(best_ptr)))) {
+            best_ptr = w;
+        }
+        if (NULL == wrap_ptr ||
+            (forward ? s < wlmtk_window_get_serial(wrap_ptr) :
+             s > wlmtk_window_get_serial(wrap_ptr))) {
+            wrap_ptr = w;
+        }
+    }
+    wlmtk_window_t *target_ptr = (NULL != best_ptr) ? best_ptr : wrap_ptr;
+    if (NULL != target_ptr) {
+        wlmtk_workspace_activate_window(workspace_ptr, target_ptr);
+    }
+}
+
+/* ------------------------------------------------------------------------- */
 void wlmtk_workspace_activate_next_window(
     wlmtk_workspace_t *workspace_ptr)
 {

@@ -153,6 +153,8 @@ struct _wlmtk_window_t {
     uint32_t                  attributes;
     /** Whether start rules were applied. */
     bool                      rules_applied;
+    /** Order of first mapping, see @ref wlmtk_window_get_serial. */
+    uint64_t                  serial;
     /** Whether this window is currently minimized (iconified). */
     bool                      minimized;
     /** Whether "Show Desktop" minimized it, to restore it on the toggle. */
@@ -856,6 +858,12 @@ bool wlmtk_window_rules_applied(wlmtk_window_t *window_ptr)
 }
 
 /* ------------------------------------------------------------------------- */
+uint64_t wlmtk_window_get_serial(wlmtk_window_t *window_ptr)
+{
+    return window_ptr->serial;
+}
+
+/* ------------------------------------------------------------------------- */
 bool wlmtk_window_is_resizable(wlmtk_window_t *window_ptr)
 {
     return window_ptr->properties & WLMTK_WINDOW_PROPERTY_RESIZABLE;
@@ -1100,6 +1108,11 @@ void wlmtk_window_set_workspace(
 {
     if (window_ptr->workspace_ptr == workspace_ptr) return;
     window_ptr->workspace_ptr = workspace_ptr;
+    // First mapped: Takes the next serial, for a stable window order.
+    static uint64_t next_serial = 1;
+    if (NULL != workspace_ptr && 0 == window_ptr->serial) {
+        window_ptr->serial = next_serial++;
+    }
 
     wl_signal_emit(&window_ptr->events.state_changed, window_ptr);
 }

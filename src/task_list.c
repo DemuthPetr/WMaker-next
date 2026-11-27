@@ -444,39 +444,42 @@ int _wlmaker_task_list_windows(
         wlmtk_workspace_get_activated_window(workspace_ptr);
     *active_index_ptr = -1;
 
-    // All candidates first, to find where the active window is.
-    int total = 0, active_pos = 0;
+    // All candidates, in the stable order they were first mapped. (Not the
+    // stacking order: That changes as windows are switched to.)
+    wlmtk_window_t *all[64];
+    int total = 0;
     for (bs_dllist_node_t *dlnode_ptr =
              wlmtk_workspace_get_windows_dllist(workspace_ptr)->head_ptr;
-         NULL != dlnode_ptr;
+         NULL != dlnode_ptr && total < 64;
          dlnode_ptr = dlnode_ptr->next_ptr) {
         wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(dlnode_ptr);
         if (wlmtk_window_is_minimized(window_ptr) ||
             !wlmtk_window_is_iconifiable(window_ptr) ||
             (wlmtk_window_get_attributes(window_ptr) &
              (WLMTK_WINDOW_ATTR_SKIP_SWITCHER | WLMTK_WINDOW_ATTR_NO_FOCUS))) continue;
-        if (window_ptr == active_ptr) active_pos = total;
-        ++total;
+        // Insertion sort by serial.
+        int k = total++;
+        while (0 < k && wlmtk_window_get_serial(all[k - 1]) >
+               wlmtk_window_get_serial(window_ptr)) {
+            all[k] = all[k - 1];
+            --k;
+        }
+        all[k] = window_ptr;
+    }
+
+    int active_pos = 0;
+    for (int i = 0; i < total; ++i) {
+        if (all[i] == active_ptr) active_pos = i;
     }
     int first = 0;
     if (total > max_windows) {
         first = BS_MIN(BS_MAX(0, active_pos - max_windows / 2),
                        total - max_windows);
     }
-
-    int n = 0, i = 0;
-    for (bs_dllist_node_t *dlnode_ptr =
-             wlmtk_workspace_get_windows_dllist(workspace_ptr)->head_ptr;
-         NULL != dlnode_ptr && n < max_windows;
-         dlnode_ptr = dlnode_ptr->next_ptr) {
-        wlmtk_window_t *window_ptr = wlmtk_window_from_dlnode(dlnode_ptr);
-        if (wlmtk_window_is_minimized(window_ptr) ||
-            !wlmtk_window_is_iconifiable(window_ptr) ||
-            (wlmtk_window_get_attributes(window_ptr) &
-             (WLMTK_WINDOW_ATTR_SKIP_SWITCHER | WLMTK_WINDOW_ATTR_NO_FOCUS))) continue;
-        if (i++ < first) continue;
-        if (window_ptr == active_ptr) *active_index_ptr = n;
-        windows_ptr[n++] = window_ptr;
+    int n = 0;
+    for (int i = first; i < total && n < max_windows; ++i) {
+        if (all[i] == active_ptr) *active_index_ptr = n;
+        windows_ptr[n++] = all[i];
     }
     return n;
 }

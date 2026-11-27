@@ -357,6 +357,18 @@ void wlmtk_workspace_activate_previous_window(
     wlmtk_workspace_t *workspace_ptr);
 
 /**
+ * Activates the next (or previous) window in the order the windows were
+ * first mapped, wrapping around: Stable, unlike the stacking order. Skips
+ * minimized windows and those not for the switcher.
+ *
+ * @param workspace_ptr
+ * @param forward             Next if true, else previous.
+ */
+void wlmtk_workspace_activate_window_in_order(
+    wlmtk_workspace_t *workspace_ptr,
+    bool forward);
+
+/**
  * Activates the @ref wlmtk_window_t *after* the currently activated one.
  *
  * Intended to permit cycling through tasks. Will activate the window, but not

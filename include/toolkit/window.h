@@ -466,6 +466,12 @@ void wlmtk_window_set_rules_applied(wlmtk_window_t *window_ptr, bool applied);
 /** @return whether start rules were applied to the window already. */
 bool wlmtk_window_rules_applied(wlmtk_window_t *window_ptr);
 
+/**
+ * @return A number that orders windows as they were first mapped: Lower is
+ *     older. Stable for the window's lifetime; 0 if never mapped.
+ */
+uint64_t wlmtk_window_get_serial(wlmtk_window_t *window_ptr);
+
 /** @return whether the window can be resized (eg. tiled). */
 bool wlmtk_window_is_resizable(wlmtk_window_t *window_ptr);
 

@@ -403,15 +403,28 @@ void wlmaker_action_execute(wlmaker_server_t *server_ptr,
         wlmtk_root_destroy_last_workspace(server_ptr->root_ptr);
         break;
 
+    // The switcher shows the windows in a stable order. Its first press goes
+    // to the window used before (Alt+Tab, release: back and forth); further
+    // presses, while held, step through the tiles in their order.
     case WLMAKER_ACTION_TASK_TO_PREVIOUS:
-        wlmtk_workspace_activate_previous_window(
-            wlmtk_root_get_current_workspace(server_ptr->root_ptr));
+        if (server_ptr->task_list_enabled) {
+            wlmtk_workspace_activate_window_in_order(
+                wlmtk_root_get_current_workspace(server_ptr->root_ptr), false);
+        } else {
+            wlmtk_workspace_activate_previous_window(
+                wlmtk_root_get_current_workspace(server_ptr->root_ptr));
+        }
         wlmaker_server_activate_task_list(server_ptr);
         break;
 
     case WLMAKER_ACTION_TASK_TO_NEXT:
-        wlmtk_workspace_activate_next_window(
-            wlmtk_root_get_current_workspace(server_ptr->root_ptr));
+        if (server_ptr->task_list_enabled) {
+            wlmtk_workspace_activate_window_in_order(
+                wlmtk_root_get_current_workspace(server_ptr->root_ptr), true);
+        } else {
+            wlmtk_workspace_activate_next_window(
+                wlmtk_root_get_current_workspace(server_ptr->root_ptr));
+        }
         wlmaker_server_activate_task_list(server_ptr);
         break;
 

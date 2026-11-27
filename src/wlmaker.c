@@ -843,6 +843,12 @@ static void _wlmaker_test_actions_next(_wlmaker_test_actions_t *ta_ptr)
     char *name_ptr = strchr(item_ptr, ':');
     if (NULL == name_ptr) return;
     *name_ptr++ = '\0';
+    // Pseudo-action: Releasing the modifiers, which ends the task list.
+    if (0 == strcmp(name_ptr, "AltRelease")) {
+        ta_ptr->action = -1;
+        wl_event_source_timer_update(ta_ptr->timer_ptr, atoi(item_ptr));
+        return;
+    }
     for (const bspl_enum_desc_t *d = wlmaker_action_desc; NULL != d->name_ptr;
          ++d) {
         if (0 != strcmp(d->name_ptr, name_ptr)) continue;
@@ -859,7 +865,13 @@ int _wlmaker_test_actions_timer(void *data_ptr)
 {
     _wlmaker_test_actions_t *ta_ptr = data_ptr;
     bs_log(BS_INFO, "WLMAKER_TEST_ACTIONS: Executing action %d", ta_ptr->action);
-    wlmaker_action_execute(ta_ptr->server_ptr, ta_ptr->action, NULL);
+    if (0 > ta_ptr->action) {
+        wl_signal_emit(&wlmim_events(
+                           ta_ptr->server_ptr->input_manager_ptr)->deactivate_task_list,
+                       NULL);
+    } else {
+        wlmaker_action_execute(ta_ptr->server_ptr, ta_ptr->action, NULL);
+    }
     _wlmaker_test_actions_next(ta_ptr);
     return 0;
 }
