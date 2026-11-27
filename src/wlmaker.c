@@ -640,6 +640,15 @@ static int _wlmaker_handle_sigterm(__UNUSED__ int signal_number, void *data_ptr)
 }
 
 /* ------------------------------------------------------------------------- */
+/** SIGUSR2: Toggles the input trace (diagnosing clicks that don't arrive). */
+static int _wlmaker_handle_sigusr2(__UNUSED__ int signal_number,
+                                   __UNUSED__ void *data_ptr)
+{
+    wlmim_toggle_input_trace();
+    return 0;
+}
+
+/* ------------------------------------------------------------------------- */
 /** SIGUSR1: Saves the session now (wmaker-next-settings' "Save session now"). */
 static int _wlmaker_handle_sigusr1(__UNUSED__ int signal_number, void *data_ptr)
 {
@@ -1019,6 +1028,9 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     struct wl_event_source *sigusr1_source_ptr = wl_event_loop_add_signal(
         wl_display_get_event_loop(server_ptr->wl_display_ptr),
         SIGUSR1, _wlmaker_handle_sigusr1, server_ptr);
+    struct wl_event_source *sigusr2_source_ptr = wl_event_loop_add_signal(
+        wl_display_get_event_loop(server_ptr->wl_display_ptr),
+        SIGUSR2, _wlmaker_handle_sigusr2, server_ptr);
 
     // TODO(kaeser@gubbe.ch): Uh, that's ugly...
     server_ptr->root_menu_ptr = wlmaker_root_menu_create(
@@ -1119,6 +1131,7 @@ int main(__UNUSED__ int argc, __UNUSED__ const char **argv)
     if (NULL != sighup_source_ptr) wl_event_source_remove(sighup_source_ptr);
     if (NULL != sigterm_source_ptr) wl_event_source_remove(sigterm_source_ptr);
     if (NULL != sigusr1_source_ptr) wl_event_source_remove(sigusr1_source_ptr);
+    if (NULL != sigusr2_source_ptr) wl_event_source_remove(sigusr2_source_ptr);
     if (NULL != wlmaker_window_rules_ptr) {
         wlmaker_window_rules_destroy(wlmaker_window_rules_ptr);
     }

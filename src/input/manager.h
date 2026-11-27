@@ -185,6 +185,15 @@ struct wlr_cursor *wlmim_wlr_cursor(wlmim_t *input_manager_ptr);
  */
 void wlmim_report_activity(wlmim_t *input_manager_ptr);
 
+/**
+ * Toggles the input trace: Logs each pointer button event (device, button,
+ * modifiers, the receiving surface and its client). For diagnosing clicks
+ * that don't arrive. Toggled by SIGUSR2.
+ *
+ * @return Whether the trace is on now.
+ */
+bool wlmim_toggle_input_trace(void);
+
 /** Sets @ref wlmim_t::last_keyboard_group_index. */
 void wlmim_set_keyboard_group_index(
     wlmim_t *input_manager_ptr,

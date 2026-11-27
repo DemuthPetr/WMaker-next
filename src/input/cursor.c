@@ -31,6 +31,7 @@
 #include <wayland-server-core.h>
 #include <wayland-server-protocol.h>
 #define WLR_USE_UNSTABLE
+#include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_keyboard.h>
@@ -176,6 +177,9 @@ _WLMIM_CURSOR_GESTURE_HANDLER(pinch_update);
 _WLMIM_CURSOR_GESTURE_HANDLER(pinch_end);
 _WLMIM_CURSOR_GESTURE_HANDLER(hold_begin);
 _WLMIM_CURSOR_GESTURE_HANDLER(hold_end);
+
+/** Whether to log pointer button events, see @ref wlmim_toggle_input_trace. */
+static bool _wlmim_input_trace = false;
 
 /* == Exported methods ===================================================== */
 
@@ -499,6 +503,37 @@ void _wlmim_cursor_handle_button(
     }
 
     wlmtk_root_pointer_button(cursor_ptr->root_ptr, &ev, modifiers);
+
+    if (_wlmim_input_trace) {
+        struct wlr_surface *s_ptr =
+            cursor_ptr->wlr_seat_ptr->pointer_state.focused_surface;
+        pid_t pid = 0;
+        if (NULL != s_ptr && NULL != s_ptr->resource) {
+            wl_client_get_credentials(
+                wl_resource_get_client(s_ptr->resource), &pid, NULL, NULL);
+        }
+        bs_log(BS_INFO, "Input trace: %s: button 0x%x%s %s, time %"PRIu32
+               ", modifiers 0x%x%s, at %.0f,%.0f -> surface %p (pid %d)",
+               wlr_pointer_button_event_ptr->pointer->base.name,
+               wlr_pointer_button_event_ptr->button,
+               ev.button != wlr_pointer_button_event_ptr->button ?
+               " (as right button)" : "",
+               WL_POINTER_BUTTON_STATE_PRESSED == ev.state ?
+               "pressed" : "released",
+               ev.time_msec, modifiers,
+               cursor_ptr->wlr_seat_ptr->pointer_state.button_count ?
+               "" : ", no buttons down",
+               cursor_ptr->wlr_cursor_ptr->x, cursor_ptr->wlr_cursor_ptr->y,
+               s_ptr, (int)pid);
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmim_toggle_input_trace(void)
+{
+    _wlmim_input_trace = !_wlmim_input_trace;
+    bs_log(BS_INFO, "Input trace %s.", _wlmim_input_trace ? "on" : "off");
+    return _wlmim_input_trace;
 }
 
 /* ------------------------------------------------------------------------- */
