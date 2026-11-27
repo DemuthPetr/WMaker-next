@@ -216,7 +216,12 @@ void wlmtk_surface_set_activated(
     wlmtk_surface_t *surface_ptr,
     bool activated)
 {
-    if (surface_ptr->activated == activated) return;
+    // Already so -- unless the keyboard focus went elsewhere meanwhile (eg. to
+    // a layer surface, like a launcher): Then take it back.
+    if (surface_ptr->activated == activated &&
+        (!activated || NULL == surface_ptr->wlr_seat_ptr ||
+         surface_ptr->wlr_seat_ptr->keyboard_state.focused_surface ==
+         surface_ptr->wlr_surface_ptr)) return;
 
     if (NULL != surface_ptr->wlr_seat_ptr) {
         struct wlr_keyboard *wlr_keyboard_ptr = wlr_seat_get_keyboard(

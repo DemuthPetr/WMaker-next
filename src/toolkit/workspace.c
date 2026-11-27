@@ -920,8 +920,12 @@ void wlmtk_workspace_activate_window(
         return;
     }
 
-    // Nothing to do.
-    if (workspace_ptr->activated_window_ptr == window_ptr) return;
+    // Already active: Only make sure it has the keyboard focus. (A click on
+    // it must give it back, if eg. a launcher had taken the focus.)
+    if (workspace_ptr->activated_window_ptr == window_ptr) {
+        if (NULL != window_ptr) wlmtk_window_refocus(window_ptr);
+        return;
+    }
 
     if (NULL != workspace_ptr->activated_window_ptr) {
         wlmtk_window_t *w_ptr = workspace_ptr->activated_window_ptr;

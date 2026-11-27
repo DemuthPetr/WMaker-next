@@ -460,6 +460,12 @@ void wlmtk_window_set_attributes(wlmtk_window_t *window_ptr, uint32_t attributes
 /** @return The window's attributes, see @ref wlmtk_window_attribute_t. */
 uint32_t wlmtk_window_get_attributes(wlmtk_window_t *window_ptr);
 
+/**
+ * Re-asserts the keyboard focus of an activated window: Its surface gets the
+ * focus back if something else (eg. a layer surface) took it meanwhile.
+ */
+void wlmtk_window_refocus(wlmtk_window_t *window_ptr);
+
 /** Marks the window as handled by start rules (start maximized, ...). */
 void wlmtk_window_set_rules_applied(wlmtk_window_t *window_ptr, bool applied);
 

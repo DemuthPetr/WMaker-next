@@ -846,6 +846,13 @@ uint32_t wlmtk_window_get_attributes(wlmtk_window_t *window_ptr)
 }
 
 /* ------------------------------------------------------------------------- */
+void wlmtk_window_refocus(wlmtk_window_t *window_ptr)
+{
+    if (!window_ptr->activated) return;
+    wl_signal_emit(&window_ptr->events.set_activated, NULL);
+}
+
+/* ------------------------------------------------------------------------- */
 void wlmtk_window_set_rules_applied(wlmtk_window_t *window_ptr, bool applied)
 {
     window_ptr->rules_applied = applied;

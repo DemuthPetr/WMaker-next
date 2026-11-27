@@ -99,6 +99,8 @@ static void _wlmaker_layer_panel_handle_surface_unmap(
     struct wl_listener *listener_ptr,
     void *data_ptr);
 
+static void _wlmaker_layer_panel_return_focus(
+    wlmaker_layer_panel_t *layer_panel_ptr);
 static void _wlmaker_layer_panel_handle_destroy(
     struct wl_listener *listener_ptr,
     void *data_ptr);
@@ -505,6 +507,25 @@ void _wlmaker_layer_panel_handle_surface_unmap(
 
     wlmtk_element_set_visible(
         wlmtk_panel_element(&layer_panel_ptr->super_panel), false);
+    _wlmaker_layer_panel_return_focus(layer_panel_ptr);
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * A panel that may have had the keyboard (eg. a launcher) goes away: The
+ * active window of the current workspace gets the focus back.
+ */
+void _wlmaker_layer_panel_return_focus(wlmaker_layer_panel_t *layer_panel_ptr)
+{
+    if (NULL == layer_panel_ptr->wlmtk_surface_ptr) return;
+    // Clear our 'activated' state, so the next exclusive map re-enters.
+    wlmtk_surface_set_activated(layer_panel_ptr->wlmtk_surface_ptr, false);
+    wlmtk_workspace_t *workspace_ptr = wlmtk_root_get_current_workspace(
+        layer_panel_ptr->server_ptr->root_ptr);
+    if (NULL == workspace_ptr) return;
+    wlmtk_window_t *window_ptr = wlmtk_workspace_get_activated_window(
+        workspace_ptr);
+    if (NULL != window_ptr) wlmtk_window_refocus(window_ptr);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -523,6 +544,7 @@ void _wlmaker_layer_panel_handle_destroy(
         listener_ptr, wlmaker_layer_panel_t, destroy_listener);
 
     layer_panel_ptr->wlr_layer_surface_v1_ptr = NULL;
+    _wlmaker_layer_panel_return_focus(layer_panel_ptr);
     _wlmaker_layer_panel_destroy(layer_panel_ptr);
 }
 

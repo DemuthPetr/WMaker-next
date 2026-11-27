@@ -37,6 +37,7 @@
 #include <wlr/types/wlr_primary_selection.h>
 #include <wlr/types/wlr_primary_selection_v1.h>
 #include <wlr/types/wlr_seat.h>
+#include <wlr/types/wlr_virtual_keyboard_v1.h>
 #include <wlr/types/wlr_virtual_pointer_v1.h>
 #include <wlr/types/wlr_xdg_activation_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
@@ -73,6 +74,9 @@ static void _wlmaker_server_handle_xdg_activation_request_activate(
     struct wl_listener *listener_ptr,
     void *data_ptr);
 static void _wlmaker_server_handle_new_virtual_pointer(
+    struct wl_listener *listener_ptr,
+    void *data_ptr);
+static void _wlmaker_server_handle_new_virtual_keyboard(
     struct wl_listener *listener_ptr,
     void *data_ptr);
 
@@ -309,6 +313,18 @@ wlmaker_server_t *wlmaker_server_create(
         &server_ptr->new_virtual_pointer_listener,
         _wlmaker_server_handle_new_virtual_pointer);
 
+    server_ptr->wlr_virtual_keyboard_manager_ptr =
+        wlr_virtual_keyboard_manager_v1_create(server_ptr->wl_display_ptr);
+    if (NULL == server_ptr->wlr_virtual_keyboard_manager_ptr) {
+        bs_log(BS_ERROR, "Failed wlr_virtual_keyboard_manager_v1_create()");
+        wlmaker_server_destroy(server_ptr);
+        return NULL;
+    }
+    wlmtk_util_connect_listener_signal(
+        &server_ptr->wlr_virtual_keyboard_manager_ptr->events.new_virtual_keyboard,
+        &server_ptr->new_virtual_keyboard_listener,
+        _wlmaker_server_handle_new_virtual_keyboard);
+
     server_ptr->layer_shell_ptr = wlmaker_layer_shell_create(server_ptr);
     if (NULL == server_ptr->layer_shell_ptr) {
         bs_log(BS_ERROR, "Failed wlmaker_layer_shell_create()");
@@ -422,6 +438,7 @@ void wlmaker_server_destroy(wlmaker_server_t *server_ptr)
     wlmtk_util_disconnect_listener(
         &server_ptr->xdg_activation_request_activate_listener);
     wlmtk_util_disconnect_listener(&server_ptr->new_virtual_pointer_listener);
+    wlmtk_util_disconnect_listener(&server_ptr->new_virtual_keyboard_listener);
 
     if (NULL != server_ptr->layer_shell_ptr) {
         wlmaker_layer_shell_destroy(server_ptr->layer_shell_ptr);
@@ -691,6 +708,25 @@ void _wlmaker_server_handle_new_virtual_pointer(
     if (NULL == server_ptr->input_manager_ptr) return;
     wlmim_add_input_device(server_ptr->input_manager_ptr,
                            &event_ptr->new_pointer->pointer.base);
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Handles `new_virtual_keyboard`: Adds it like any other keyboard.
+ *
+ * @param listener_ptr
+ * @param data_ptr            struct wlr_virtual_keyboard_v1.
+ */
+void _wlmaker_server_handle_new_virtual_keyboard(
+    struct wl_listener *listener_ptr,
+    void *data_ptr)
+{
+    wlmaker_server_t *server_ptr = BS_CONTAINER_OF(
+        listener_ptr, wlmaker_server_t, new_virtual_keyboard_listener);
+    struct wlr_virtual_keyboard_v1 *keyboard_ptr = data_ptr;
+    if (NULL == server_ptr->input_manager_ptr) return;
+    wlmim_add_input_device(server_ptr->input_manager_ptr,
+                           &keyboard_ptr->keyboard.base);
 }
 
 /* == End of server.c ====================================================== */

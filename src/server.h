@@ -121,6 +121,10 @@ struct _wlmaker_server_t {
     struct wlr_virtual_pointer_manager_v1 *wlr_virtual_pointer_manager_ptr;
     /** Listener for `new_virtual_pointer`. */
     struct wl_listener        new_virtual_pointer_listener;
+    /** virtual-keyboard: Keyboards of clients, eg. remote input, wtype. */
+    struct wlr_virtual_keyboard_manager_v1 *wlr_virtual_keyboard_manager_ptr;
+    /** Listener for `new_virtual_keyboard`. */
+    struct wl_listener        new_virtual_keyboard_listener;
     /** Enables clipboard managers and tools (wl-copy, wl-paste). */
     struct wlr_data_control_manager_v1 *wlr_data_control_manager_v1_ptr;
 
