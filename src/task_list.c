@@ -107,7 +107,8 @@ static void _wlmaker_task_list_draw_tile(
     int x,
     int y);
 static void _wlmaker_task_list_tile_position(int index, int *x_ptr, int *y_ptr);
-static bool _wlmaker_task_list_want_thumbnails(wlmaker_server_t *server_ptr);
+static bool _wlmaker_task_list_want_thumbnails(wlmaker_server_t *server_ptr,
+                                               int *width_ptr);
 static struct wlr_buffer *_wlmaker_task_list_render_thumbnail(
     wlmaker_server_t *server_ptr,
     wlmtk_window_t *window_ptr,
@@ -174,13 +175,13 @@ static const int _wlmaker_task_list_title_height = 28;
 static const int _wlmaker_task_list_max_tiles = 9;
 
 /** With thumbnails: Tile size, and the thumbnail's area within. */
-static const int _wlmaker_task_list_thumb_tile_w = 224;
+static int _wlmaker_task_list_thumb_tile_w = 224;
 /** With thumbnails: Tile height (thumbnail, then icon & name). */
-static const int _wlmaker_task_list_thumb_tile_h = 172;
+static int _wlmaker_task_list_thumb_tile_h = 172;
 /** With thumbnails: Size of the thumbnail area. */
-static const int _wlmaker_task_list_thumb_w = 208;
+static int _wlmaker_task_list_thumb_w = 208;
 /** With thumbnails: Size of the thumbnail area. */
-static const int _wlmaker_task_list_thumb_h = 130;
+static int _wlmaker_task_list_thumb_h = 130;
 /** With thumbnails: Icon size, below the thumbnail. */
 static const int _wlmaker_task_list_thumb_icon = 24;
 
@@ -310,8 +311,14 @@ bool _wlmaker_task_list_refresh(
         wlmtk_root_get_current_workspace(server_ptr->root_ptr);
 
     // Layout: Thumbnails if so configured, in as many columns as fit.
+    int thumb_w = 208;
     _wlmaker_task_list_thumbnails = _wlmaker_task_list_want_thumbnails(
-        server_ptr);
+        server_ptr, &thumb_w);
+    // Thumbnails at 16:10, with room for the icon & title line below.
+    _wlmaker_task_list_thumb_w = thumb_w;
+    _wlmaker_task_list_thumb_h = thumb_w * 10 / 16;
+    _wlmaker_task_list_thumb_tile_w = _wlmaker_task_list_thumb_w + 16;
+    _wlmaker_task_list_thumb_tile_h = _wlmaker_task_list_thumb_h + 42;
     _wlmaker_task_list_tile_w = _wlmaker_task_list_thumbnails ?
         _wlmaker_task_list_thumb_tile_w : _wlmaker_task_list_tile;
     _wlmaker_task_list_tile_h = _wlmaker_task_list_thumbnails ?
@@ -645,19 +652,27 @@ void _wlmaker_task_list_tile_position(int index, int *x_ptr, int *y_ptr)
 }
 
 /* ------------------------------------------------------------------------- */
-/** Whether the configuration asks for thumbnails: "Switcher" "Thumbnails". */
-bool _wlmaker_task_list_want_thumbnails(wlmaker_server_t *server_ptr)
+/**
+ * Whether the configuration asks for thumbnails ("Switcher" "Thumbnails"),
+ * and their width ("ThumbnailSize", pixels; kept at its default otherwise).
+ */
+bool _wlmaker_task_list_want_thumbnails(wlmaker_server_t *server_ptr,
+                                        int *width_ptr)
 {
     bspl_dict_t *dict_ptr = bspl_dict_get_dict(
         server_ptr->config_dict_ptr, "Switcher");
     if (NULL == dict_ptr) return false;
-    struct { bool thumbnails; } c = {};
+    struct { bool thumbnails; int64_t size; } c = {};
     const bspl_desc_t desc[] = {
         BSPL_DESC_BOOL("Thumbnails", false, __typeof__(c), thumbnails,
                        thumbnails, false),
+        BSPL_DESC_INT64("ThumbnailSize", false, __typeof__(c), size, size,
+                        208),
         BSPL_DESC_SENTINEL()
     };
-    return bspl_decode_dict(dict_ptr, desc, &c) && c.thumbnails;
+    if (!bspl_decode_dict(dict_ptr, desc, &c)) return false;
+    *width_ptr = (int)BS_MAX(96, BS_MIN(c.size, 480));
+    return c.thumbnails;
 }
 
 /** Context for @ref _wlmaker_task_list_render_buffer. */
