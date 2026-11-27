@@ -79,6 +79,7 @@ bool wlmtk_element_init(wlmtk_element_t *element_ptr)
     wl_signal_init(&element_ptr->events.pointer_enter);
     wl_signal_init(&element_ptr->events.pointer_leave);
     wl_signal_init(&element_ptr->events.pointer_motion);
+    wl_signal_init(&element_ptr->events.position_changed);
 
     element_ptr->last_pointer_motion_event = (wlmtk_pointer_motion_event_t){
         .x = NAN, .y = NAN, .time_msec = 0 };
@@ -268,6 +269,7 @@ void wlmtk_element_set_position(
     element_ptr->y = y;
 
     wlmtk_element_invalidate_parent_layout(element_ptr);
+    wl_signal_emit(&element_ptr->events.position_changed, element_ptr);
 }
 
 /* ------------------------------------------------------------------------- */

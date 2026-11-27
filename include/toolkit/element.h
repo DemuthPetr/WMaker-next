@@ -61,6 +61,8 @@ typedef struct {
     struct wl_signal          pointer_leave;
     /** Pointer motion within element. @ref wlmtk_pointer_motion_event_t. */
     struct wl_signal          pointer_motion;
+    /** The element's position (within its parent) changed. */
+    struct wl_signal          position_changed;
 } wlmtk_element_events_t;
 
 /** Virtual method table for the element. */

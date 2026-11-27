@@ -30,6 +30,7 @@
 #include <wayland-server-core.h>
 #define WLR_USE_UNSTABLE
 #include <wlr/types/wlr_compositor.h>
+#include <wlr/types/wlr_scene.h>
 #include <wlr/version.h>
 #include <wlr/xwayland/xwayland.h>
 #include <xcb/xcb_icccm.h>
@@ -96,6 +97,8 @@ struct _wlmaker_xwl_surface_t {
     struct wl_listener        window_request_fullscreen_listener;
     /** Listener for @ref wlmtk_window_events_t::request_maximized. */
     struct wl_listener        window_request_maximized_listener;
+    /** Listener for the window element's `position_changed`. */
+    struct wl_listener        window_position_changed_listener;
 
     /** The toolkit surface. Only available once 'associated'. */
     wlmtk_surface_t           *surface_ptr;
@@ -159,6 +162,13 @@ static void _wlmaker_xwl_surface_handle_window_request_close(
     struct wl_listener *listener_ptr,
     void *data_ptr);
 static void _wlmaker_xwl_surface_handle_window_set_activated(
+    struct wl_listener *listener_ptr,
+    void *data_ptr);
+static void _xwl_surface_configure_position(
+    wlmaker_xwl_surface_t *xwl_surface_ptr,
+    int width,
+    int height);
+static void _xwl_surface_handle_window_position_changed(
     struct wl_listener *listener_ptr,
     void *data_ptr);
 static void _wlmaker_xwl_surface_handle_window_request_size(
@@ -480,6 +490,14 @@ void _xwl_surface_handle_associate(
         xwl_surface_ptr->wlr_xwayland_surface_ptr->modal) {
 
         BS_ASSERT(NULL == xwl_surface_ptr->window_ptr);
+        // Attached to a parent earlier (eg. before it was flagged modal): It
+        // becomes a window of its own now, so leave the parent.
+        if (NULL != xwl_surface_ptr->parent_surface_ptr) {
+            wlmtk_base_pop_element(
+                &xwl_surface_ptr->parent_surface_ptr->base,
+                wlmtk_base_element(&xwl_surface_ptr->base));
+            xwl_surface_ptr->parent_surface_ptr = NULL;
+        }
 
         xwl_surface_ptr->window_ptr = wlmtk_window_create(
             wlmtk_base_element(&xwl_surface_ptr->base),
@@ -532,6 +550,10 @@ void _xwl_surface_handle_associate(
             &wlmtk_window_events(xwl_surface_ptr->window_ptr)->request_maximized,
             &xwl_surface_ptr->window_request_maximized_listener,
             _wlmaker_xwl_surface_handle_window_request_maximized);
+        wlmtk_util_connect_listener_signal(
+            &wlmtk_window_element(xwl_surface_ptr->window_ptr)->events.position_changed,
+            &xwl_surface_ptr->window_position_changed_listener,
+            _xwl_surface_handle_window_position_changed);
 
         wl_signal_emit(
             &xwl_surface_ptr->server_ptr->window_created_event,
@@ -587,6 +609,8 @@ void _xwl_surface_handle_dissociate(
             &xwl_surface_ptr->window_request_fullscreen_listener);
         wlmtk_util_disconnect_listener(
             &xwl_surface_ptr->window_request_maximized_listener);
+        wlmtk_util_disconnect_listener(
+            &xwl_surface_ptr->window_position_changed_listener);
 
         wl_signal_emit(
             &xwl_surface_ptr->server_ptr->window_destroyed_event,
@@ -669,6 +693,14 @@ void _xwl_surface_handle_set_parent(
 
     if (NULL == parent_xwl_surface_ptr) return;
 
+    // Already a toplevel window: Its element belongs to that window, and can't
+    // also be a child of the parent. Stays a window.
+    if (NULL != xwl_surface_ptr->window_ptr) {
+        bs_log(BS_INFO, "XWL surface %p: Ignoring parent %p, is a window.",
+               xwl_surface_ptr, parent_xwl_surface_ptr);
+        return;
+    }
+
     // TODO(kaeser@gubbe.ch): We're currently treating modal windows as
     // toplevel windows. They're not popups, for sure. To support this,
     // we'll need wlmtk_window_t to support child wlmtk_window_t.
@@ -678,6 +710,9 @@ void _xwl_surface_handle_set_parent(
         &parent_xwl_surface_ptr->base,
         wlmtk_base_element(&xwl_surface_ptr->base));
     xwl_surface_ptr->parent_surface_ptr = parent_xwl_surface_ptr;
+    // Its position is relative to the parent now.
+    _xwl_surface_handle_set_geometry(&xwl_surface_ptr->set_geometry_listener,
+                                     NULL);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -720,6 +755,10 @@ void _xwl_surface_handle_set_geometry(
     // of the specified surface. For @ref wlmtk_element_t, the position is
     // just relative to the parent @ref wlmtk_container_t. So we need to
     // subtract each parent surface's position.
+    // A toplevel's content sits at its window's origin. (X11 has the window's
+    // actual position: See @ref _xwl_surface_configure_position.)
+    if (NULL != xwl_surface_ptr->window_ptr) return;
+
     int x = xwl_surface_ptr->wlr_xwayland_surface_ptr->x;
     int y = xwl_surface_ptr->wlr_xwayland_surface_ptr->y;
     _xwl_surface_adjust_absolute_pos(xwl_surface_ptr, &x, &y);
@@ -743,6 +782,9 @@ void _xwl_surface_handle_surface_map(
         wlmtk_root_get_current_workspace(
             xwl_surface_ptr->server_ptr->root_ptr);
     wlmtk_workspace_map_window(workspace_ptr, xwl_surface_ptr->window_ptr);
+    // Placed now: Tell the X11 window where.
+    _xwl_surface_handle_window_position_changed(
+        &xwl_surface_ptr->window_position_changed_listener, NULL);
 
     // Start minimized: Requested before mapping, or by the ICCCM hint.
     struct wlr_xwayland_surface *s = xwl_surface_ptr->wlr_xwayland_surface_ptr;
@@ -828,9 +870,42 @@ void _wlmaker_xwl_surface_handle_window_request_size(
         listener_ptr, wlmaker_xwl_surface_t, window_request_size_listener);
     const struct wlr_box *box_ptr = data_ptr;
 
-    wlr_xwayland_surface_configure(
-        xwl_surface_ptr->wlr_xwayland_surface_ptr,
-        0, 0, box_ptr->width, box_ptr->height);
+    _xwl_surface_configure_position(
+        xwl_surface_ptr, box_ptr->width, box_ptr->height);
+}
+
+/* ------------------------------------------------------------------------- */
+/**
+ * Tells the X11 window where it actually is, at the given size: Its surface's
+ * position in the layout. X11 clients place their menus and popups relative
+ * to that; a stale position puts them off.
+ */
+void _xwl_surface_configure_position(
+    wlmaker_xwl_surface_t *xwl_surface_ptr,
+    int width,
+    int height)
+{
+    struct wlr_xwayland_surface *s = xwl_surface_ptr->wlr_xwayland_surface_ptr;
+    int x = s->x, y = s->y;
+    if (NULL != xwl_surface_ptr->surface_ptr) {
+        struct wlr_scene_node *node_ptr = wlmtk_surface_element(
+            xwl_surface_ptr->surface_ptr)->wlr_scene_node_ptr;
+        if (NULL != node_ptr) wlr_scene_node_coords(node_ptr, &x, &y);
+    }
+    wlr_xwayland_surface_configure(s, x, y, width, height);
+}
+
+/* ------------------------------------------------------------------------- */
+/** The window moved: Tell the X11 window its new position. */
+void _xwl_surface_handle_window_position_changed(
+    struct wl_listener *listener_ptr,
+    __UNUSED__ void *data_ptr)
+{
+    wlmaker_xwl_surface_t *xwl_surface_ptr = BS_CONTAINER_OF(
+        listener_ptr, wlmaker_xwl_surface_t, window_position_changed_listener);
+    struct wlr_xwayland_surface *s = xwl_surface_ptr->wlr_xwayland_surface_ptr;
+    if (0 >= s->width || 0 >= s->height) return;
+    _xwl_surface_configure_position(xwl_surface_ptr, s->width, s->height);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -926,14 +1001,12 @@ void _xwl_surface_adjust_absolute_pos(
     int *x_ptr,
     int *y_ptr)
 {
+    // X11 positions are absolute; an element's is relative to its parent's
+    // base: Subtract the parent's X11 position.
     if (NULL == surface_ptr ||
         NULL == surface_ptr->parent_surface_ptr) return;
-
-    wlmtk_element_t *element_ptr = wlmtk_base_element(&surface_ptr->base);
-    *x_ptr = *x_ptr - element_ptr->x;
-    *y_ptr = *y_ptr - element_ptr->y;
-    _xwl_surface_adjust_absolute_pos(
-        surface_ptr->parent_surface_ptr, x_ptr, y_ptr);
+    *x_ptr -= surface_ptr->parent_surface_ptr->wlr_xwayland_surface_ptr->x;
+    *y_ptr -= surface_ptr->parent_surface_ptr->wlr_xwayland_surface_ptr->y;
 }
 /* == Unit Tests =========================================================== */
 
