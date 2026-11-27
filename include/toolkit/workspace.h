@@ -357,6 +357,13 @@ void wlmtk_workspace_activate_previous_window(
     wlmtk_workspace_t *workspace_ptr);
 
 /**
+ * @return The window that looks active: The activated one, or -- while a
+ *     compositor menu has the focus -- the one activated before.
+ */
+wlmtk_window_t *wlmtk_workspace_get_visually_active_window(
+    wlmtk_workspace_t *workspace_ptr);
+
+/**
  * Activates the next (or previous) window in the order the windows were
  * first mapped, wrapping around: Stable, unlike the stacking order. Skips
  * minimized windows and those not for the switcher.

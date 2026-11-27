@@ -137,6 +137,12 @@ struct _wlmtk_workspace_t {
     struct wl_listener        element_pointer_motion_listener;
 
     /** Preview of where a dragged window will snap to. NULL if none. */
+    /**
+     * The window that looks active. As the activated window -- except while a
+     * compositor menu (not iconifiable) has the focus: Then still the window
+     * that had it before, so opening a menu doesn't flash the window inactive.
+     */
+    wlmtk_window_t            *visually_active_window_ptr;
     wlmtk_rectangle_t         *snap_preview_ptr;
     /** Geometry info box shown while moving or resizing. NULL if hidden. */
     wlmtk_buffer_t            *geometry_ptr;
@@ -671,6 +677,9 @@ void wlmtk_workspace_unmap_window(wlmtk_workspace_t *workspace_ptr,
         workspace_ptr->formerly_activated_window_ptr = NULL;
         need_activation = true;
     }
+    if (workspace_ptr->visually_active_window_ptr == window_ptr) {
+        workspace_ptr->visually_active_window_ptr = NULL;
+    }
 
     wlmtk_element_set_visible(wlmtk_window_element(window_ptr), false);
     if (wlmtk_window_is_minimized(window_ptr)) {
@@ -927,6 +936,17 @@ void wlmtk_workspace_activate_window(
         return;
     }
 
+    // Which window looks active: Not changed by compositor menus taking (or
+    // giving back) the focus.
+    wlmtk_window_t *old_visual_ptr = workspace_ptr->visually_active_window_ptr;
+    bool to_menu = NULL != window_ptr && !wlmtk_window_is_iconifiable(window_ptr);
+    bool from_menu = NULL == window_ptr &&
+        NULL != workspace_ptr->activated_window_ptr &&
+        !wlmtk_window_is_iconifiable(workspace_ptr->activated_window_ptr);
+    if (!to_menu && !from_menu) {
+        workspace_ptr->visually_active_window_ptr = window_ptr;
+    }
+
     if (NULL != workspace_ptr->activated_window_ptr) {
         wlmtk_window_t *w_ptr = workspace_ptr->activated_window_ptr;
         workspace_ptr->formerly_activated_window_ptr =
@@ -942,6 +962,22 @@ void wlmtk_workspace_activate_window(
         }
         workspace_ptr->formerly_activated_window_ptr = window_ptr;
     }
+
+    // The window that looked active, but wasn't activated (a menu was):
+    // Now it looks inactive.
+    if (NULL != old_visual_ptr &&
+        old_visual_ptr != workspace_ptr->visually_active_window_ptr &&
+        old_visual_ptr != window_ptr &&
+        wlmtk_window_get_workspace(old_visual_ptr) == workspace_ptr) {
+        wlmtk_window_refresh_look(old_visual_ptr);
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+wlmtk_window_t *wlmtk_workspace_get_visually_active_window(
+    wlmtk_workspace_t *workspace_ptr)
+{
+    return workspace_ptr->visually_active_window_ptr;
 }
 
 /* ------------------------------------------------------------------------- */

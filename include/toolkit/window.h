@@ -461,6 +461,15 @@ void wlmtk_window_set_attributes(wlmtk_window_t *window_ptr, uint32_t attributes
 uint32_t wlmtk_window_get_attributes(wlmtk_window_t *window_ptr);
 
 /**
+ * Whether the window looks active (title bar, opacity): When activated -- or
+ * when it was, and a compositor menu (eg. the root menu) took the focus since.
+ */
+bool wlmtk_window_looks_active(wlmtk_window_t *window_ptr);
+
+/** Re-applies the active or inactive look: Title bar and opacity. */
+void wlmtk_window_refresh_look(wlmtk_window_t *window_ptr);
+
+/**
  * Re-asserts the keyboard focus of an activated window: Its surface gets the
  * focus back if something else (eg. a layer surface) took it meanwhile.
  */

@@ -548,7 +548,8 @@ void wlmtk_window_set_activated(
     wlmtk_window_apply_effects_opacity(window_ptr);
 
     if (NULL != window_ptr->titlebar_ptr) {
-        wlmtk_titlebar_set_activated(window_ptr->titlebar_ptr, activated);
+        wlmtk_titlebar_set_activated(window_ptr->titlebar_ptr,
+                                     wlmtk_window_looks_active(window_ptr));
     }
 
     if (!activated) {
@@ -568,7 +569,7 @@ void wlmtk_window_apply_effects_opacity(wlmtk_window_t *window_ptr)
     // A running animation drives the opacity; it applies this when done.
     if (wlmtk_effects_is_animating(element_ptr)) return;
     const wlmtk_effects_t *effects_ptr = wlmtk_effects_get();
-    double opacity = window_ptr->activated ?
+    double opacity = wlmtk_window_looks_active(window_ptr) ?
         effects_ptr->active_opacity : effects_ptr->inactive_opacity;
     // Fully opaque is the default: Skip touching buffers then.
     if (1.0 <= effects_ptr->active_opacity &&
@@ -843,6 +844,25 @@ void wlmtk_window_set_attributes(wlmtk_window_t *window_ptr, uint32_t attributes
 uint32_t wlmtk_window_get_attributes(wlmtk_window_t *window_ptr)
 {
     return window_ptr->attributes;
+}
+
+/* ------------------------------------------------------------------------- */
+bool wlmtk_window_looks_active(wlmtk_window_t *window_ptr)
+{
+    if (window_ptr->activated) return true;
+    return NULL != window_ptr->workspace_ptr &&
+        wlmtk_workspace_get_visually_active_window(
+            window_ptr->workspace_ptr) == window_ptr;
+}
+
+/* ------------------------------------------------------------------------- */
+void wlmtk_window_refresh_look(wlmtk_window_t *window_ptr)
+{
+    wlmtk_window_apply_effects_opacity(window_ptr);
+    if (NULL != window_ptr->titlebar_ptr) {
+        wlmtk_titlebar_set_activated(window_ptr->titlebar_ptr,
+                                     wlmtk_window_looks_active(window_ptr));
+    }
 }
 
 /* ------------------------------------------------------------------------- */
