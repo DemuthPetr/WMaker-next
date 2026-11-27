@@ -1275,6 +1275,10 @@ bool _wlmtk_window_element_pointer_button(
         return true;
     }
 
+    // Minimized, but still fading out: Clicks (eg. the release of the click
+    // that minimized it) must not activate -- and thus restore -- it.
+    if (wlmtk_window_is_minimized(window_ptr)) return true;
+
     // We shouldn't receive buttons when not mapped.
     wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(window_ptr);
     wlmtk_workspace_activate_window(workspace_ptr, window_ptr);

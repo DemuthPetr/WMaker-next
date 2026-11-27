@@ -657,6 +657,16 @@ void _wlmaker_server_handle_xdg_activation_request_activate(
                window_ptr);
         return;
     }
+    // A minimized window activating itself (eg. Chrome, right after being
+    // minimized) would restore itself: Only another client may restore it.
+    if (wlmtk_window_is_minimized(window_ptr) &&
+        (NULL == event_ptr->token->surface ||
+         wl_resource_get_client(event_ptr->token->surface->resource) ==
+         wl_resource_get_client(event_ptr->surface->resource))) {
+        bs_log(BS_INFO, "Ignoring self-activation of minimized window %p (%s)",
+               window_ptr, wlmtk_window_get_app_id(window_ptr));
+        return;
+    }
     wlmtk_workspace_t *workspace_ptr = wlmtk_window_get_workspace(window_ptr);
     if (NULL == workspace_ptr) return;
     wlmtk_root_switch_to_workspace(server_ptr->root_ptr, workspace_ptr);

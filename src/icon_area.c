@@ -335,7 +335,8 @@ wlmaker_miniwindow_t *_wlmaker_miniwindow_create(
         &mw_ptr->super_tile, wlmtk_buffer_element(&mw_ptr->content_buffer));
     wlmtk_tile_set_overlay(
         &mw_ptr->super_tile, wlmtk_buffer_element(&mw_ptr->overlay_buffer));
-    bs_log(BS_INFO, "Created mini-window %p for window %p", mw_ptr, window_ptr);
+    bs_log(BS_INFO, "Created mini-window %p for window %p (%s)", mw_ptr,
+           window_ptr, wlmtk_window_get_app_id(window_ptr));
     return mw_ptr;
 }
 
@@ -354,8 +355,9 @@ void _wlmaker_miniwindow_destroy(wlmaker_miniwindow_t *mw_ptr)
         mw_ptr->docked = false;
     }
     bs_dllist_remove(&icon_area_ptr->miniwindows, &mw_ptr->dlnode);
-    bs_log(BS_INFO, "Destroying mini-window %p for window %p",
-           mw_ptr, mw_ptr->window_ptr);
+    bs_log(BS_INFO, "Destroying mini-window %p for window %p (%s)",
+           mw_ptr, mw_ptr->window_ptr,
+           wlmtk_window_get_app_id(mw_ptr->window_ptr));
 
     wlmtk_tile_set_overlay(&mw_ptr->super_tile, NULL);
     wlmtk_tile_set_content(&mw_ptr->super_tile, NULL);
